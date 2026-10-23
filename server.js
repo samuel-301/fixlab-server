@@ -102,6 +102,13 @@ app.get("/health", (_req, res) => {
   });
 });
 
+app.get("/", (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: "FixLab API is running",
+  });
+});
+
 app.use('/uploads', express.static(path.join(path.resolve(), 'uploads')));
 
 app.use((req, res, next) => {
