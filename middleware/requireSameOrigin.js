@@ -1,0 +1,12 @@
+const allowedOrigins = () => {
+  const configured = process.env.CLIENT_ORIGINS?.split(",").map((origin) => origin.trim()).filter(Boolean);
+  return configured?.length ? configured : ["http://localhost:3000", "http://localhost:5173"];
+};
+
+export const requireSameOrigin = (req, res, next) => {
+  const origin = req.get("origin");
+  if (!origin || !allowedOrigins().includes(origin)) {
+    return res.status(403).json({ message: "Request origin is not allowed" });
+  }
+  next();
+};

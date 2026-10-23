@@ -1,0 +1,41 @@
+{
+  "name": "backend-project",
+  "version": "1.0.0",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "dev": "nodemon server.js",
+    "migrate:devices": "node scripts/migrate-legacy-records.js",
+    "test": "node --test"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "bcrypt": "^6.0.0",
+    "bcryptjs": "^3.0.2",
+    "cloudinary": "^2.11.0",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dotenv": "^16.5.0",
+    "express": "^5.1.0",
+    "express-rate-limit": "^8.7.1",
+    "geoip-lite": "^1.4.10",
+    "google-auth-library": "^11.3.1",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.15.1",
+    "multer": "^2.0.1",
+    "node-fetch": "^3.3.2",
+    "nodemailer": "^10.1.7",
+    "puppeteer": "^24.10.0",
+    "redis": "^5.12.1",
+    "socket.io": "^4.8.1",
+    "useragent": "^2.3.0",
+    "uuid": "^11.1.0",
+    "web-push": "^3.6.7"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.10"
+  }
+}
