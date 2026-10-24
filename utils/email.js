@@ -1,101 +1,63 @@
-import nodemailer from "nodemailer";
+import { createHash } from "node:crypto";
 
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (character) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
 }[character]));
 
-const smtpConfig = () => {
-  const host = process.env.SMTP_HOST?.trim();
-  const port = Number(process.env.SMTP_PORT || 587);
-  const user = process.env.EMAIL_USER?.trim();
-  const pass = process.env.EMAIL_PASS;
-  const secure = process.env.SMTP_SECURE
-    ? process.env.SMTP_SECURE.trim().toLowerCase() === "true"
-    : port === 465;
-
-  if (!host || !user || !pass) {
-    const error = new Error(
-      "SMTP email delivery is not configured: set SMTP_HOST, EMAIL_USER, and EMAIL_PASS.",
-    );
-    error.code = "SMTP_CONFIG_MISSING";
-    throw error;
-  }
-  if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    const error = new Error("SMTP_PORT must be a valid TCP port.");
-    error.code = "SMTP_CONFIG_INVALID";
-    throw error;
-  }
-
-  return { host, port, secure, auth: { user, pass } };
-};
-
-let transporter;
-let transporterConfigKey;
-
-const getTransporter = () => {
-  const config = smtpConfig();
-  // Recreate the transporter if credentials or SMTP settings change.
-  const configKey = JSON.stringify({
-    host: config.host,
-    port: config.port,
-    secure: config.secure,
-    user: config.auth.user,
-    pass: config.auth.pass,
-  });
-  if (!transporter || transporterConfigKey !== configKey) {
-    transporter = nodemailer.createTransport({
-      ...config,
-      connectionTimeout: Number(process.env.SMTP_CONNECTION_TIMEOUT_MS || 10000),
-      greetingTimeout: Number(process.env.SMTP_GREETING_TIMEOUT_MS || 10000),
-      socketTimeout: Number(process.env.SMTP_SOCKET_TIMEOUT_MS || 20000),
-    });
-    transporterConfigKey = configKey;
-  }
-  return transporter;
-};
-
 export const isSecurityEmailConfigured = () => Boolean(
-  process.env.SMTP_HOST?.trim()
-    && process.env.EMAIL_USER?.trim()
-    && process.env.EMAIL_PASS
-    && process.env.EMAIL_FROM?.trim(),
+  process.env.RESEND_API_KEY?.trim() && process.env.EMAIL_FROM?.trim(),
 );
 
-const sendEmail = async ({ to, subject, text, html }) => {
-  const from = process.env.EMAIL_FROM?.trim() || process.env.EMAIL_USER?.trim();
-  if (!from) {
-    const error = new Error("SMTP email delivery is not configured: EMAIL_FROM or EMAIL_USER is missing.");
-    error.code = "SMTP_CONFIG_MISSING";
+const sendEmail = async ({ to, subject, text, html, idempotencyKey }) => {
+  const apiKey = process.env.RESEND_API_KEY?.trim();
+  const from = process.env.EMAIL_FROM?.trim();
+  if (!apiKey || !from) {
+    const error = new Error("Email delivery is not configured: set RESEND_API_KEY and EMAIL_FROM.");
+    error.code = "EMAIL_CONFIG_MISSING";
     throw error;
   }
   if (!to || !subject || (!html && !text)) {
     throw new Error("Email requires explicit to, subject, and html or text content.");
   }
 
+  const payload = { from, to: Array.isArray(to) ? to : [to], subject };
+  if (html) payload.html = html;
+  if (text) payload.text = text;
+  const stableKey = idempotencyKey || createHash("sha256")
+    .update(JSON.stringify({ to: payload.to, subject, text: text || "", html: html || "" }))
+    .digest("hex");
+
+  let response;
   try {
-    const info = await getTransporter().sendMail({
-      from,
-      to,
-      subject,
-      ...(html ? { html } : {}),
-      ...(text ? { text } : {}),
+    response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "Idempotency-Key": stableKey,
+      },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(15000),
     });
-    if (!info?.messageId) {
-      const error = new Error("SMTP server did not return a message ID.");
-      error.code = "SMTP_EMPTY_RESPONSE";
-      throw error;
-    }
-    return info;
   } catch (cause) {
-    const deliveryError = new Error(
-      `SMTP email delivery failed: ${cause?.message || "unknown SMTP error"}`,
-      { cause },
-    );
-    deliveryError.name = "SmtpDeliveryError";
-    deliveryError.code = cause?.code || "SMTP_DELIVERY_ERROR";
-    deliveryError.statusCode = cause?.responseCode;
-    throw deliveryError;
+    const error = new Error(`Email API request failed: ${cause?.message || "network error"}`, { cause });
+    error.name = "EmailDeliveryError";
+    error.code = cause?.code || "EMAIL_API_NETWORK_ERROR";
+    throw error;
   }
+
+  const responseText = await response.text();
+  let result = {};
+  try { result = responseText ? JSON.parse(responseText) : {}; } catch { /* handled as provider response below */ }
+  if (!response.ok || !result.id) {
+    const detail = typeof result.message === "string" ? result.message : responseText.slice(0, 500);
+    const error = new Error(`Email API rejected the message (${response.status}): ${detail || "no message ID returned"}`);
+    error.name = "EmailDeliveryError";
+    error.code = result.name || result.code || `EMAIL_API_HTTP_${response.status}`;
+    error.statusCode = response.status;
+    throw error;
+  }
+  return result;
 };
 
 const brandedEmail = (title, body) => `<!doctype html><html><body style="margin:0;background:#000;color:#fff;font-family:Arial,sans-serif"><div style="max-width:560px;margin:32px auto;padding:32px;background:#0a0a0a;border:1px solid #292929;border-radius:12px"><strong style="font-size:20px">FixLab</strong><h1 style="font-size:22px;margin:32px 0 16px">${escapeHtml(title)}</h1><div style="color:#d4d4d4;line-height:1.6">${body}</div></div></body></html>`;
