@@ -1,73 +1,105 @@
-import nodemailer from "nodemailer";
-
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (character) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
 }[character]));
 
-const getSmtpConfig = () => {
-  const host = process.env.SMTP_HOST?.trim();
-  const port = Number(process.env.SMTP_PORT || 587);
-  const secure = process.env.SMTP_SECURE
-    ? process.env.SMTP_SECURE.toLowerCase() === "true"
-    : port === 465;
-  const user = process.env.EMAIL_USER?.trim();
-  const pass = process.env.EMAIL_PASS;
-  const from = process.env.EMAIL_FROM?.trim() || user;
-  if (!host || !Number.isInteger(port) || port < 1 || port > 65535 || !user || !pass || !from) {
-    const error = new Error("Email delivery is not configured: set SMTP_HOST, SMTP_PORT, EMAIL_USER, EMAIL_PASS, and EMAIL_FROM (or use EMAIL_USER as sender).");
+const parseEmailFrom = (value) => {
+  const raw = value?.trim();
+  if (!raw) return null;
+
+  // Accept either "FixLab <sender@example.com>" or "sender@example.com".
+  const namedAddress = raw.match(/^(.*?)\s*<\s*([^<>\s]+@[^<>\s]+)\s*>$/);
+  if (namedAddress) {
+    return {
+      name: namedAddress[1].trim().replace(/^["']|["']$/g, "") || "FixLab",
+      email: namedAddress[2].trim(),
+    };
+  }
+  if (/^[^<>\s]+@[^<>\s]+$/.test(raw)) {
+    return { name: "FixLab", email: raw };
+  }
+  return null;
+};
+
+export const isSecurityEmailConfigured = () => Boolean(
+  process.env.BREVO_API_KEY?.trim() && parseEmailFrom(process.env.EMAIL_FROM),
+);
+
+const sendEmail = async ({ to, subject, text, html, htmlContent }) => {
+  const apiKey = process.env.BREVO_API_KEY?.trim();
+  const sender = parseEmailFrom(process.env.EMAIL_FROM);
+  if (!apiKey || !sender) {
+    const error = new Error("Email delivery is not configured: set BREVO_API_KEY and a valid EMAIL_FROM sender.");
     error.code = "EMAIL_CONFIG_MISSING";
     throw error;
   }
-  return { host, port, secure, user, pass, from };
-};
 
-let transporter;
-let transporterKey;
-const getTransporter = () => {
-  const config = getSmtpConfig();
-  const key = JSON.stringify({ host: config.host, port: config.port, secure: config.secure, user: config.user });
-  if (!transporter || key !== transporterKey) {
-    transporter = nodemailer.createTransport({
-      host: config.host, port: config.port, secure: config.secure,
-      auth: { user: config.user, pass: config.pass },
-      connectionTimeout: Number(process.env.SMTP_CONNECTION_TIMEOUT_MS || 10000),
-      greetingTimeout: Number(process.env.SMTP_GREETING_TIMEOUT_MS || 10000),
-      socketTimeout: Number(process.env.SMTP_SOCKET_TIMEOUT_MS || 15000),
-    });
-    transporterKey = key;
+  const recipients = (Array.isArray(to) ? to : [to])
+    .map((recipient) => typeof recipient === "string" ? { email: recipient.trim() } : recipient)
+    .filter((recipient) => recipient && typeof recipient.email === "string" && recipient.email.trim())
+    .map((recipient) => ({
+      email: recipient.email.trim(),
+      ...(recipient.name ? { name: String(recipient.name).trim() } : {}),
+    }));
+
+  const content = htmlContent || html;
+  if (!recipients.length || !subject || (!content && !text)) {
+    throw new Error("Email requires a valid recipient, subject, and htmlContent or text content.");
   }
-  return { transporter, from: config.from };
-};
 
-export const isSecurityEmailConfigured = () => {
-  try { getSmtpConfig(); return true; } catch { return false; }
-};
+  const payload = {
+    sender,
+    to: recipients,
+    subject,
+    ...(content ? { htmlContent: content } : {}),
+    ...(text ? { textContent: text } : {}),
+  };
 
-const sendEmail = async ({ to, subject, text, html }) => {
-  if (!to || !subject || (!html && !text)) {
-    throw new Error("Email requires explicit to, subject, and html or text content.");
-  }
-  const { transporter: mailTransporter, from } = getTransporter();
+  let response;
   try {
-    const info = await mailTransporter.sendMail({
-      from, to: Array.isArray(to) ? to.join(", ") : to, subject,
-      ...(text ? { text } : {}), ...(html ? { html } : {}),
+    response = await fetch("https://api.brevo.com/v3/smtp/email", {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        "api-key": apiKey,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(Number(process.env.EMAIL_API_TIMEOUT_MS || 15000)),
     });
-    if (!info.accepted?.length && !info.messageId) {
-      const error = new Error("SMTP server did not confirm acceptance of the email.");
-      error.code = "SMTP_MESSAGE_NOT_ACCEPTED";
-      throw error;
-    }
-    return info;
   } catch (cause) {
-    const error = new Error(`SMTP email delivery failed: ${cause?.message || "unknown SMTP error"}`, { cause });
+    const error = new Error(`Brevo email request failed: ${cause?.message || "network error"}`, { cause });
     error.name = "EmailDeliveryError";
-    error.code = cause?.code || "SMTP_DELIVERY_ERROR";
-    if (cause?.responseCode) error.responseCode = cause.responseCode;
-    if (cause?.command) error.command = cause.command;
+    error.code = cause?.code || (cause?.name === "TimeoutError" ? "EMAIL_API_TIMEOUT" : "EMAIL_API_NETWORK_ERROR");
     throw error;
   }
+
+  const responseText = await response.text();
+  let result = {};
+  try {
+    result = responseText ? JSON.parse(responseText) : {};
+  } catch {
+    // Keep the original response text for the error below.
+  }
+
+  if (!response.ok) {
+    const detail = typeof result.message === "string"
+      ? result.message
+      : typeof result.code === "string"
+        ? result.code
+        : responseText.slice(0, 500);
+    const error = new Error(`Brevo rejected the email (${response.status}): ${detail || "unknown API error"}`);
+    error.name = "EmailDeliveryError";
+    error.code = result.code || `BREVO_API_HTTP_${response.status}`;
+    error.statusCode = response.status;
+    throw error;
+  }
+
+  return result;
 };
+
+// Simple API for callers that already have a complete HTML email body.
+export const sendBrevoEmail = ({ to, subject, htmlContent }) =>
+  sendEmail({ to, subject, htmlContent });
 
 const brandedEmail = (title, body) => `<!doctype html><html><body style="margin:0;background:#000;color:#fff;font-family:Arial,sans-serif"><div style="max-width:560px;margin:32px auto;padding:32px;background:#0a0a0a;border:1px solid #292929;border-radius:12px"><strong style="font-size:20px">FixLab</strong><h1 style="font-size:22px;margin:32px 0 16px">${escapeHtml(title)}</h1><div style="color:#d4d4d4;line-height:1.6">${body}</div></div></body></html>`;
 
