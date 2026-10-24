@@ -132,7 +132,7 @@ export const sendSecurityAlert = (email, username, details, idempotencyKey) => {
   const safeBrowser = escapeHtml(details.browser || details.device || "Unknown browser");
   const safePlatform = escapeHtml(details.platform || "Unknown platform");
   const safeMethod = escapeHtml(details.authMethod === "google" ? "Google" : details.authMethod === "password" ? "Email and password" : "Email verification");
-  const appUrl = process.env.CLIENT_URL || process.env.APP_URL || "http://localhost:3000";
+  const appUrl = process.env.CLIENT_URL || process.env.APP_URL || "https://fixlab-repair.vercel.app";
   const appDomain = (() => { try { return new URL(appUrl).host; } catch { return "FixLab"; } })();
   const logoUrl = `${appUrl.replace(/\/$/, "")}/icon.svg`;
   return sendEmail({

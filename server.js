@@ -58,7 +58,7 @@ const httpServer = http.createServer(app);
 
 const clientOrigins = process.env.CLIENT_ORIGINS
   ? process.env.CLIENT_ORIGINS.split(",").map((origin) => origin.trim()).filter(Boolean)
-  : ["http://localhost:5173", "http://localhost:3000"];
+  : ["https://fixlab-repair.vercel.app"];
 
 const io = new Server(httpServer, {
   cors: {

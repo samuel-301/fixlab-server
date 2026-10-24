@@ -1,6 +1,6 @@
 const allowedOrigins = () => {
   const configured = process.env.CLIENT_ORIGINS?.split(",").map((origin) => origin.trim()).filter(Boolean);
-  return configured?.length ? configured : ["http://localhost:3000", "http://localhost:5173"];
+  return configured?.length ? configured : ["https://fixlab-repair.vercel.app"];
 };
 
 export const requireSameOrigin = (req, res, next) => {
