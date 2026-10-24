@@ -1,43 +1,52 @@
-import nodemailer from "nodemailer";
+import { Resend } from "resend";
+import { randomUUID } from "node:crypto";
 
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (character) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
 }[character]));
 
-const smtpPort = Number(process.env.EMAIL_PORT || 587);
-const smtpTransport = () => {
-  const { EMAIL_HOST, EMAIL_USER, EMAIL_PASS } = process.env;
-  if (!EMAIL_HOST || !EMAIL_USER || !EMAIL_PASS || !Number.isInteger(smtpPort)) {
-    throw new Error("SMTP email delivery is not configured");
+const resendClient = () => {
+  const apiKey = process.env.RESEND_API_KEY?.trim();
+  if (!apiKey) {
+    const error = new Error("Resend email delivery is not configured: RESEND_API_KEY is missing.");
+    error.code = "RESEND_CONFIG_MISSING";
+    throw error;
   }
-  return nodemailer.createTransport({
-    host: EMAIL_HOST,
-    port: smtpPort,
-    secure: smtpPort === 465,
-    auth: { user: EMAIL_USER, pass: EMAIL_PASS },
-  });
+  return new Resend(apiKey);
 };
 
 export const isSecurityEmailConfigured = () => Boolean(
-  process.env.EMAIL_HOST?.trim() && process.env.EMAIL_USER?.trim() && process.env.EMAIL_PASS?.trim() &&
-  Number.isInteger(Number(process.env.EMAIL_PORT || 587)) && Number(process.env.EMAIL_PORT || 587) > 0 &&
-  Number(process.env.EMAIL_PORT || 587) <= 65535,
+  process.env.RESEND_API_KEY?.trim() && process.env.EMAIL_FROM?.trim(),
 );
 
 const sendEmail = async ({ to, subject, text, html, idempotencyKey }) => {
-  const transport = smtpTransport();
-  try {
-    await transport.sendMail({
-      from: process.env.EMAIL_FROM || `FixLab <${process.env.EMAIL_USER}>`,
-      to,
-      subject,
-      text,
-      html,
-      messageId: idempotencyKey ? `<${idempotencyKey}@fixlab.local>` : undefined,
-    });
-  } finally {
-    transport.close();
+  const from = process.env.EMAIL_FROM?.trim();
+  if (!from) {
+    const error = new Error("Resend email delivery is not configured: EMAIL_FROM is missing.");
+    error.code = "RESEND_CONFIG_MISSING";
+    throw error;
   }
+  if (!to || !subject || (!html && !text)) {
+    throw new Error("Email requires explicit to, subject, and html or text content.");
+  }
+
+  // A stable key is supplied for retryable security alerts; other sends get a unique key.
+  const key = String(idempotencyKey || randomUUID()).replace(/[^a-zA-Z0-9._/-]/g, "-").slice(0, 240);
+  const payload = { from, to, subject, ...(html ? { html } : {}), ...(text ? { text } : {}) };
+  const { data, error } = await resendClient().emails.send(payload, { idempotencyKey: key });
+  if (error) {
+    const deliveryError = new Error(`Resend rejected email delivery: ${error.message || "unknown provider error"}`);
+    deliveryError.name = "ResendDeliveryError";
+    deliveryError.code = error.name || "RESEND_API_ERROR";
+    deliveryError.statusCode = error.statusCode;
+    throw deliveryError;
+  }
+  if (!data?.id) {
+    const deliveryError = new Error("Resend did not return an email ID.");
+    deliveryError.code = "RESEND_EMPTY_RESPONSE";
+    throw deliveryError;
+  }
+  return data;
 };
 
 const brandedEmail = (title, body) => `<!doctype html><html><body style="margin:0;background:#000;color:#fff;font-family:Arial,sans-serif"><div style="max-width:560px;margin:32px auto;padding:32px;background:#0a0a0a;border:1px solid #292929;border-radius:12px"><strong style="font-size:20px">FixLab</strong><h1 style="font-size:22px;margin:32px 0 16px">${escapeHtml(title)}</h1><div style="color:#d4d4d4;line-height:1.6">${body}</div></div></body></html>`;
