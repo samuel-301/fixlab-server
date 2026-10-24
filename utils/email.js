@@ -1,63 +1,72 @@
-import { createHash } from "node:crypto";
+import nodemailer from "nodemailer";
 
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (character) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
 }[character]));
 
-export const isSecurityEmailConfigured = () => Boolean(
-  process.env.RESEND_API_KEY?.trim() && process.env.EMAIL_FROM?.trim(),
-);
-
-const sendEmail = async ({ to, subject, text, html, idempotencyKey }) => {
-  const apiKey = process.env.RESEND_API_KEY?.trim();
-  const from = process.env.EMAIL_FROM?.trim();
-  if (!apiKey || !from) {
-    const error = new Error("Email delivery is not configured: set RESEND_API_KEY and EMAIL_FROM.");
+const getSmtpConfig = () => {
+  const host = process.env.SMTP_HOST?.trim();
+  const port = Number(process.env.SMTP_PORT || 587);
+  const secure = process.env.SMTP_SECURE
+    ? process.env.SMTP_SECURE.toLowerCase() === "true"
+    : port === 465;
+  const user = process.env.EMAIL_USER?.trim();
+  const pass = process.env.EMAIL_PASS;
+  const from = process.env.EMAIL_FROM?.trim() || user;
+  if (!host || !Number.isInteger(port) || port < 1 || port > 65535 || !user || !pass || !from) {
+    const error = new Error("Email delivery is not configured: set SMTP_HOST, SMTP_PORT, EMAIL_USER, EMAIL_PASS, and EMAIL_FROM (or use EMAIL_USER as sender).");
     error.code = "EMAIL_CONFIG_MISSING";
     throw error;
   }
+  return { host, port, secure, user, pass, from };
+};
+
+let transporter;
+let transporterKey;
+const getTransporter = () => {
+  const config = getSmtpConfig();
+  const key = JSON.stringify({ host: config.host, port: config.port, secure: config.secure, user: config.user });
+  if (!transporter || key !== transporterKey) {
+    transporter = nodemailer.createTransport({
+      host: config.host, port: config.port, secure: config.secure,
+      auth: { user: config.user, pass: config.pass },
+      connectionTimeout: Number(process.env.SMTP_CONNECTION_TIMEOUT_MS || 10000),
+      greetingTimeout: Number(process.env.SMTP_GREETING_TIMEOUT_MS || 10000),
+      socketTimeout: Number(process.env.SMTP_SOCKET_TIMEOUT_MS || 15000),
+    });
+    transporterKey = key;
+  }
+  return { transporter, from: config.from };
+};
+
+export const isSecurityEmailConfigured = () => {
+  try { getSmtpConfig(); return true; } catch { return false; }
+};
+
+const sendEmail = async ({ to, subject, text, html }) => {
   if (!to || !subject || (!html && !text)) {
     throw new Error("Email requires explicit to, subject, and html or text content.");
   }
-
-  const payload = { from, to: Array.isArray(to) ? to : [to], subject };
-  if (html) payload.html = html;
-  if (text) payload.text = text;
-  const stableKey = idempotencyKey || createHash("sha256")
-    .update(JSON.stringify({ to: payload.to, subject, text: text || "", html: html || "" }))
-    .digest("hex");
-
-  let response;
+  const { transporter: mailTransporter, from } = getTransporter();
   try {
-    response = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-        "Idempotency-Key": stableKey,
-      },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(15000),
+    const info = await mailTransporter.sendMail({
+      from, to: Array.isArray(to) ? to.join(", ") : to, subject,
+      ...(text ? { text } : {}), ...(html ? { html } : {}),
     });
+    if (!info.accepted?.length && !info.messageId) {
+      const error = new Error("SMTP server did not confirm acceptance of the email.");
+      error.code = "SMTP_MESSAGE_NOT_ACCEPTED";
+      throw error;
+    }
+    return info;
   } catch (cause) {
-    const error = new Error(`Email API request failed: ${cause?.message || "network error"}`, { cause });
+    const error = new Error(`SMTP email delivery failed: ${cause?.message || "unknown SMTP error"}`, { cause });
     error.name = "EmailDeliveryError";
-    error.code = cause?.code || "EMAIL_API_NETWORK_ERROR";
+    error.code = cause?.code || "SMTP_DELIVERY_ERROR";
+    if (cause?.responseCode) error.responseCode = cause.responseCode;
+    if (cause?.command) error.command = cause.command;
     throw error;
   }
-
-  const responseText = await response.text();
-  let result = {};
-  try { result = responseText ? JSON.parse(responseText) : {}; } catch { /* handled as provider response below */ }
-  if (!response.ok || !result.id) {
-    const detail = typeof result.message === "string" ? result.message : responseText.slice(0, 500);
-    const error = new Error(`Email API rejected the message (${response.status}): ${detail || "no message ID returned"}`);
-    error.name = "EmailDeliveryError";
-    error.code = result.name || result.code || `EMAIL_API_HTTP_${response.status}`;
-    error.statusCode = response.status;
-    throw error;
-  }
-  return result;
 };
 
 const brandedEmail = (title, body) => `<!doctype html><html><body style="margin:0;background:#000;color:#fff;font-family:Arial,sans-serif"><div style="max-width:560px;margin:32px auto;padding:32px;background:#0a0a0a;border:1px solid #292929;border-radius:12px"><strong style="font-size:20px">FixLab</strong><h1 style="font-size:22px;margin:32px 0 16px">${escapeHtml(title)}</h1><div style="color:#d4d4d4;line-height:1.6">${body}</div></div></body></html>`;
