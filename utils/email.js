@@ -1,5 +1,5 @@
 import { Resend } from "resend";
-import { randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (character) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
@@ -31,7 +31,9 @@ const sendEmail = async ({ to, subject, text, html, idempotencyKey }) => {
   }
 
   // A stable key is supplied for retryable security alerts; other sends get a unique key.
-  const key = String(idempotencyKey || randomUUID()).replace(/[^a-zA-Z0-9._/-]/g, "-").slice(0, 240);
+  const key = idempotencyKey
+    ? String(idempotencyKey).replace(/[^a-zA-Z0-9._/-]/g, "-").slice(0, 240)
+    : `email-${createHash("sha256").update(JSON.stringify({ from, to, subject, text: text || "", html: html || "" })).digest("hex")}`;
   const payload = { from, to, subject, ...(html ? { html } : {}), ...(text ? { text } : {}) };
   const { data, error } = await resendClient().emails.send(payload, { idempotencyKey: key });
   if (error) {
