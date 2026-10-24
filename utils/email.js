@@ -1,54 +1,101 @@
-import { Resend } from "resend";
-import { createHash } from "node:crypto";
+import nodemailer from "nodemailer";
 
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (character) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
 }[character]));
 
-const resendClient = () => {
-  const apiKey = process.env.RESEND_API_KEY?.trim();
-  if (!apiKey) {
-    const error = new Error("Resend email delivery is not configured: RESEND_API_KEY is missing.");
-    error.code = "RESEND_CONFIG_MISSING";
+const smtpConfig = () => {
+  const host = process.env.SMTP_HOST?.trim();
+  const port = Number(process.env.SMTP_PORT || 587);
+  const user = process.env.EMAIL_USER?.trim();
+  const pass = process.env.EMAIL_PASS;
+  const secure = process.env.SMTP_SECURE
+    ? process.env.SMTP_SECURE.trim().toLowerCase() === "true"
+    : port === 465;
+
+  if (!host || !user || !pass) {
+    const error = new Error(
+      "SMTP email delivery is not configured: set SMTP_HOST, EMAIL_USER, and EMAIL_PASS.",
+    );
+    error.code = "SMTP_CONFIG_MISSING";
     throw error;
   }
-  return new Resend(apiKey);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    const error = new Error("SMTP_PORT must be a valid TCP port.");
+    error.code = "SMTP_CONFIG_INVALID";
+    throw error;
+  }
+
+  return { host, port, secure, auth: { user, pass } };
+};
+
+let transporter;
+let transporterConfigKey;
+
+const getTransporter = () => {
+  const config = smtpConfig();
+  // Recreate the transporter if credentials or SMTP settings change.
+  const configKey = JSON.stringify({
+    host: config.host,
+    port: config.port,
+    secure: config.secure,
+    user: config.auth.user,
+    pass: config.auth.pass,
+  });
+  if (!transporter || transporterConfigKey !== configKey) {
+    transporter = nodemailer.createTransport({
+      ...config,
+      connectionTimeout: Number(process.env.SMTP_CONNECTION_TIMEOUT_MS || 10000),
+      greetingTimeout: Number(process.env.SMTP_GREETING_TIMEOUT_MS || 10000),
+      socketTimeout: Number(process.env.SMTP_SOCKET_TIMEOUT_MS || 20000),
+    });
+    transporterConfigKey = configKey;
+  }
+  return transporter;
 };
 
 export const isSecurityEmailConfigured = () => Boolean(
-  process.env.RESEND_API_KEY?.trim() && process.env.EMAIL_FROM?.trim(),
+  process.env.SMTP_HOST?.trim()
+    && process.env.EMAIL_USER?.trim()
+    && process.env.EMAIL_PASS
+    && process.env.EMAIL_FROM?.trim(),
 );
 
-const sendEmail = async ({ to, subject, text, html, idempotencyKey }) => {
-  const from = process.env.EMAIL_FROM?.trim();
+const sendEmail = async ({ to, subject, text, html }) => {
+  const from = process.env.EMAIL_FROM?.trim() || process.env.EMAIL_USER?.trim();
   if (!from) {
-    const error = new Error("Resend email delivery is not configured: EMAIL_FROM is missing.");
-    error.code = "RESEND_CONFIG_MISSING";
+    const error = new Error("SMTP email delivery is not configured: EMAIL_FROM or EMAIL_USER is missing.");
+    error.code = "SMTP_CONFIG_MISSING";
     throw error;
   }
   if (!to || !subject || (!html && !text)) {
     throw new Error("Email requires explicit to, subject, and html or text content.");
   }
 
-  // A stable key is supplied for retryable security alerts; other sends get a unique key.
-  const key = idempotencyKey
-    ? String(idempotencyKey).replace(/[^a-zA-Z0-9._/-]/g, "-").slice(0, 240)
-    : `email-${createHash("sha256").update(JSON.stringify({ from, to, subject, text: text || "", html: html || "" })).digest("hex")}`;
-  const payload = { from, to, subject, ...(html ? { html } : {}), ...(text ? { text } : {}) };
-  const { data, error } = await resendClient().emails.send(payload, { idempotencyKey: key });
-  if (error) {
-    const deliveryError = new Error(`Resend rejected email delivery: ${error.message || "unknown provider error"}`);
-    deliveryError.name = "ResendDeliveryError";
-    deliveryError.code = error.name || "RESEND_API_ERROR";
-    deliveryError.statusCode = error.statusCode;
+  try {
+    const info = await getTransporter().sendMail({
+      from,
+      to,
+      subject,
+      ...(html ? { html } : {}),
+      ...(text ? { text } : {}),
+    });
+    if (!info?.messageId) {
+      const error = new Error("SMTP server did not return a message ID.");
+      error.code = "SMTP_EMPTY_RESPONSE";
+      throw error;
+    }
+    return info;
+  } catch (cause) {
+    const deliveryError = new Error(
+      `SMTP email delivery failed: ${cause?.message || "unknown SMTP error"}`,
+      { cause },
+    );
+    deliveryError.name = "SmtpDeliveryError";
+    deliveryError.code = cause?.code || "SMTP_DELIVERY_ERROR";
+    deliveryError.statusCode = cause?.responseCode;
     throw deliveryError;
   }
-  if (!data?.id) {
-    const deliveryError = new Error("Resend did not return an email ID.");
-    deliveryError.code = "RESEND_EMPTY_RESPONSE";
-    throw deliveryError;
-  }
-  return data;
 };
 
 const brandedEmail = (title, body) => `<!doctype html><html><body style="margin:0;background:#000;color:#fff;font-family:Arial,sans-serif"><div style="max-width:560px;margin:32px auto;padding:32px;background:#0a0a0a;border:1px solid #292929;border-radius:12px"><strong style="font-size:20px">FixLab</strong><h1 style="font-size:22px;margin:32px 0 16px">${escapeHtml(title)}</h1><div style="color:#d4d4d4;line-height:1.6">${body}</div></div></body></html>`;
