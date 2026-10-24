@@ -50,8 +50,8 @@ const sendEmail = async ({ to, subject, text, html, htmlContent }) => {
     sender,
     to: recipients,
     subject,
-    ...(content ? { htmlContent: content } : {}),
-    ...(text ? { textContent: text } : {}),
+    // Brevo accepts one body type per request; prefer the existing branded HTML.
+    ...(content ? { htmlContent: content } : { textContent: text }),
   };
 
   let response;
