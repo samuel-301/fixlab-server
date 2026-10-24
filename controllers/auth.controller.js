@@ -157,6 +157,7 @@ export const getEmailSignInMethods = async (req, res) => {
 export const startEmailChallenge = async (req, res) => {
   const email = normalizeEmail(req.body?.email);
   if (!validEmail(email)) return res.status(400).json({ message: "Enter a valid email address." });
+  let challengeId;
   try {
     const recent = await AuthChallenge.findOne({ email, purpose: "sign-in", createdAt: { $gt: new Date(Date.now() - 60_000) } });
     if (recent) return res.status(202).json({ message: "If this address can be used, a code has been sent." });
@@ -164,21 +165,27 @@ export const startEmailChallenge = async (req, res) => {
     const appUrl = process.env.CLIENT_URL || process.env.APP_URL;
     const linkToken = appUrl ? generateOpaqueToken() : null;
     await AuthChallenge.deleteMany({ email, purpose: "sign-in" });
-    await AuthChallenge.create({
-      email,
-      purpose: "sign-in",
-      otpHash: hashSecret(otp),
+    const challenge = await AuthChallenge.create({
+      email, purpose: "sign-in", otpHash: hashSecret(otp),
       linkTokenHash: linkToken ? hashSecret(linkToken) : undefined,
       expiresAt: new Date(Date.now() + 10 * 60_000),
     });
+    challengeId = challenge._id;
     const signInUrl = linkToken
       ? `${appUrl.replace(/\/$/, "")}/auth/continue#emailToken=${encodeURIComponent(linkToken)}&email=${encodeURIComponent(email)}`
       : undefined;
     await sendOtpEmail(email, otp, signInUrl);
     return res.status(202).json({ message: "If this address can be used, a code has been sent." });
   } catch (error) {
-    const cause = typeof error?.code === "string" ? error.code : error?.name || "unknown error";
-    console.error(`[auth-email] challenge delivery failed (${cause})`);
+    // Remove failed challenges so retries do not falsely report that an email was sent.
+    if (challengeId) await AuthChallenge.deleteOne({ _id: challengeId }).catch(() => {});
+    console.error("[auth-email] challenge delivery failed", {
+      name: String(error?.name || "Error").slice(0, 80),
+      code: String(error?.code || "").slice(0, 80),
+      responseCode: Number(error?.statusCode || error?.responseCode) || undefined,
+      command: String(error?.command || "").slice(0, 40) || undefined,
+      message: String(error?.message || "Unknown email delivery error").slice(0, 300),
+    });
     return res.status(503).json({ message: "Email sign-in is temporarily unavailable. Try again later." });
   }
 };
