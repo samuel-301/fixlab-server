@@ -5,7 +5,7 @@ const sessionSchema = new mongoose.Schema(
     user: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
     sessionId: { type: String, required: true, unique: true },
     ip: String,
-    location: String,
+    location: String,\n    geolocation: { type: mongoose.Schema.Types.Mixed, default: undefined },
     userAgent: String,
     device: String,
     platform: String,
