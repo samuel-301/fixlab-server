@@ -81,3 +81,28 @@ export const buildSessionResponse = (session, currentSessionId) => {
   };
 };
 
+
+/**
+ * Revoke a single session only when it belongs to the requested user.
+ * Returns the deleted session document so callers can notify that device.
+ */
+export const revokeOwnedSession = async (SessionModel, userId, sessionId) => {
+  if (!SessionModel || !userId || typeof sessionId !== "string") {
+    throw new TypeError("Session model, user ID, and session ID are required");
+  }
+  return SessionModel.findOneAndDelete({ user: userId, sessionId });
+};
+
+/**
+ * Revoke every session except the caller's current session.
+ * The current session is preserved so the user remains signed in.
+ */
+export const revokeOtherSessions = async (SessionModel, userId, currentSessionId) => {
+  if (!SessionModel || !userId || typeof currentSessionId !== "string" || !currentSessionId) {
+    throw new TypeError("Session model, user ID, and current session ID are required");
+  }
+  return SessionModel.deleteMany({
+    user: userId,
+    sessionId: { $ne: currentSessionId },
+  });
+};
