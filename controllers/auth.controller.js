@@ -28,7 +28,8 @@ import {
   sendPasswordChangedEmail,
   sendResetEmail,
 } from "../utils/email.js";
-import { sendSecurityNotifications } from "../utils/security-notifications.js";\nimport { resolveClientLocation, formatLocation } from "../utils/geolocation.js";
+import { sendSecurityNotifications } from "../utils/security-notifications.js";
+import { resolveClientLocation, formatLocation } from "../utils/geolocation.js";
 import NotificationPreference from "../models/NotificationPreference.js";
 import WebPushSubscription from "../models/WebPushSubscription.js";
 import SecurityNotification from "../models/SecurityNotification.js";
