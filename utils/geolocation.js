@@ -16,6 +16,10 @@ export const normalizeIp = (value) => {
   return isIP(ip) ? ip.toLowerCase() : null;
 };
 
+// Use Express's already-resolved req.ip; do not parse arbitrary X-Forwarded-For
+// values here because proxy trust must be configured at the Express boundary.
+export const getReliableClientIp = (value) => normalizeIp(value);
+
 const ipv4Number = (ip) => ip.split(".").reduce((n, octet) => (n * 256) + Number(octet), 0);
 const inV4Range = (ip, base, bits) => {
   const mask = bits === 0 ? 0 : (0xffffffff << (32 - bits)) >>> 0;
@@ -36,7 +40,6 @@ export const isPublicIp = (value) => {
     return !blocked.some(([base, bits]) => inV4Range(ip, base, bits));
   }
   const lower = ip.toLowerCase();
-  // GeoIP-lite does not geolocate non-global IPv6; reject special-use ranges.
   return !(lower === "::" || lower === "::1" ||
     lower.startsWith("fc") || lower.startsWith("fd") ||
     /^fe[89ab]/.test(lower) || lower.startsWith("2001:db8:") ||
@@ -49,7 +52,6 @@ const emptyLocation = (ip, source = "unavailable") => ({
 });
 
 const logDiagnostic = (status) => {
-  // Deliberately omit client IP and provider credentials from logs.
   console.info("[geoip]", { status });
 };
 
