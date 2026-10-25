@@ -69,7 +69,11 @@ const createSession = async (req, userId, isRecognizedDevice = false, authMethod
 
 const authCookieOptions = () => {
   const configuredSameSite = process.env.COOKIE_SAME_SITE?.toLowerCase();
-  const sameSite = ["lax", "strict", "none"].includes(configuredSameSite) ? configuredSameSite : "lax";
+  // The Vercel frontend and Render API use different sites. In production,
+  // the browser needs SameSite=None; Secure to send the session cookie to the API.
+  // COOKIE_SAME_SITE can still explicitly override this for custom deployments.
+  const defaultSameSite = process.env.NODE_ENV === "production" ? "none" : "lax";
+  const sameSite = ["lax", "strict", "none"].includes(configuredSameSite) ? configuredSameSite : defaultSameSite;
   return {
     httpOnly: true,
     sameSite,
