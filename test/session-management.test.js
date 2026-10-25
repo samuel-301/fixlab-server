@@ -26,7 +26,7 @@ test("buildSessionResponse marks current session only from validated session ide
 
   assert.equal(response.isCurrent, true);
   assert.equal(response.ip, "Unavailable");
-  assert.equal(response.location, "Unavailable");
+  assert.equal(response.location, "Location unavailable");
   assert.equal(response.deviceType, "Unknown");
   assert.equal("password" in response, false);
 });

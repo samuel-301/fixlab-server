@@ -5,7 +5,7 @@ const loginEventSchema = new mongoose.Schema({
   sessionId: { type: String, required: true, unique: true },
   occurredAt: { type: Date, default: Date.now },
   ip: { type: String, maxlength: 64 },
-  location: { type: String, default: "Unknown location", maxlength: 160 },
+  location: { type: String, default: "Location unavailable", maxlength: 160 },\n  geolocation: { type: mongoose.Schema.Types.Mixed, default: undefined },
   browser: { type: String, default: "Unknown browser", maxlength: 160 },
   platform: { type: String, default: "Unknown platform", maxlength: 100 },
   device: { type: String, default: "Unknown device", maxlength: 100 },

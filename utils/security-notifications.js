@@ -2,6 +2,7 @@ import NotificationPreference from "../models/NotificationPreference.js";
 import { isSecurityEmailConfigured, sendSecurityAlert } from "./email.js";
 import { buildLoginPushPayload, sendLoginPushNotifications } from "./web-push.js";
 import SecurityNotification from "../models/SecurityNotification.js";
+import { formatLocation } from "./geolocation.js";
 
 const retryDelivery = async (send, onAttempt, maxAttempts = 3) => {
   let lastError;
@@ -17,13 +18,16 @@ const retryDelivery = async (send, onAttempt, maxAttempts = 3) => {
 };
 
 export const sendSecurityNotifications = async (user, details, eventId) => {
+  const location = formatLocation(details.geolocation || (details.location && details.location !== "Unknown location" ? { city: details.location } : null));
+  const notificationDetails = { ...details, location };
   const preference = await NotificationPreference.findOne({ user: user._id }).lean().catch(() => null);
   const notification = await SecurityNotification.create({
     user: user._id,
     sessionId: eventId,
     title: "New login detected",
-    message: `Successful ${details.authMethod === "google" ? "Google" : details.authMethod === "password" ? "email and password" : "verified email"} sign-in near ${details.location || "Unknown location"} using ${details.browser || details.device || "an unknown browser or device"}.`,
-    location: details.location || "Unknown location",
+    message: `Successful ${details.authMethod === "google" ? "Google" : details.authMethod === "password" ? "email and password" : "verified email"} sign-in near ${location} using ${details.browser || details.device || "an unknown browser or device"}.`,
+    location,
+    geolocation: details.geolocation,
     browser: details.browser || "Unknown browser",
     platform: details.platform || "Unknown platform",
     device: details.device || "Unknown device",
@@ -40,7 +44,7 @@ export const sendSecurityNotifications = async (user, details, eventId) => {
   const deliveries = [];
   if (user.email && user.emailVerified === true && preference?.emailLoginAlerts !== false && isSecurityEmailConfigured()) {
     deliveries.push(retryDelivery(
-      () => sendSecurityAlert(user.email, user.username, details, eventId),
+      () => sendSecurityAlert(user.email, user.username, notificationDetails, eventId),
       (attempt) => SecurityNotification.updateOne({ _id: notification._id }, { $set: { emailAttempts: attempt } }),
     )
       .then(async () => { await SecurityNotification.updateOne({ _id: notification._id }, { $set: { emailStatus: "sent" } }); return "sent"; })

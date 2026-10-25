@@ -1,52 +1,9 @@
-import { isIP } from "node:net";
 import useragent from "useragent";
-import geoip from "geoip-lite";
+import { getReliableClientIp, resolveClientLocation, formatLocation } from "./geolocation.js";
 
 export const SESSION_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-const normalizeIp = (value) => {
-  if (typeof value !== "string") return null;
-  const ip = value.trim().replace(/^\[|\]$/g, "");
-  const ipv4Mapped = ip.match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i);
-  const normalized = ipv4Mapped ? ipv4Mapped[1] : ip;
-  return isIP(normalized) ? normalized : null;
-};
-
-const isPublicIp = (ip) => {
-  const normalized = normalizeIp(ip);
-  if (!normalized) return false;
-  if (isIP(normalized) === 4) {
-    const [first, second] = normalized.split(".").map(Number);
-    return !(
-      first === 0 ||
-      first === 10 ||
-      first === 127 ||
-      (first === 100 && second >= 64 && second <= 127) ||
-      (first === 169 && second === 254) ||
-      (first === 172 && second >= 16 && second <= 31) ||
-      (first === 192 && second === 168) ||
-      (first === 192 && second === 0 && (normalized.split(".")[2] === "0" || normalized.split(".")[2] === "2")) ||
-      (first === 198 && (second === 18 || second === 19 || second === 51)) ||
-      (first === 203 && second === 0 && normalized.split(".")[2] === "113") ||
-      first >= 224
-    );
-  }
-
-  const lower = normalized.toLowerCase();
-  return (lower.startsWith("2") || lower.startsWith("3")) && !(
-    lower === "::" ||
-    lower === "::1" ||
-    lower.startsWith("2001:db8:") ||
-    lower.startsWith("fc") ||
-    lower.startsWith("fd") ||
-    /^fe[89ab]/.test(lower)
-  );
-};
-
-export const getReliableClientIp = (requestIp) => {
-  const ip = normalizeIp(requestIp);
-  return ip && isPublicIp(ip) ? ip : null;
-};
+export { getReliableClientIp } from "./geolocation.js";
 
 const readableBrowserName = (family) => {
   if (!family || family === "Other") return "Unknown browser";
@@ -92,11 +49,16 @@ export const describeUserAgent = (userAgentString) => {
 };
 
 export const buildSessionResponse = (session, currentSessionId) => {
-  const ip = getReliableClientIp(session.ip);
-  const geolocation = ip ? geoip.lookup(ip) : null;
-  const location = geolocation && (geolocation.city || geolocation.country)
-    ? `Approx. ${[geolocation.city, geolocation.region, geolocation.country].filter(Boolean).join(", ")}`
-    : "Unavailable";
+  const savedLocation = session.geolocation && typeof session.geolocation === "object"
+    ? session.geolocation
+    : null;
+  const resolved = savedLocation && (savedLocation.city || savedLocation.country)
+    ? savedLocation
+    : resolveClientLocation(session.ip);
+  const ip = resolved.ip || getReliableClientIp(session.ip);
+  const location = session.location && session.location !== "Unavailable" && session.location !== "Unknown location"
+    ? session.location
+    : formatLocation(resolved);
   const detected = describeUserAgent(session.userAgent);
 
   return {
@@ -104,6 +66,7 @@ export const buildSessionResponse = (session, currentSessionId) => {
     sessionId: session.sessionId,
     ip: ip || "Unavailable",
     location,
+    geolocation: resolved,
     browser: detected.browser,
     browserName: detected.browserName,
     platform: detected.platform,
@@ -118,8 +81,3 @@ export const buildSessionResponse = (session, currentSessionId) => {
   };
 };
 
-export const revokeOwnedSession = (Session, userId, sessionId) =>
-  Session.findOneAndDelete({ sessionId, user: userId });
-
-export const revokeOtherSessions = (Session, userId, currentSessionId) =>
-  Session.deleteMany({ user: userId, sessionId: { $ne: currentSessionId } });

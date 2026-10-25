@@ -29,6 +29,7 @@ import {
   sendResetEmail,
 } from "../utils/email.js";
 import { sendSecurityNotifications } from "../utils/security-notifications.js";
+import { resolveClientLocation, formatLocation } from "../utils/geolocation.js";
 import NotificationPreference from "../models/NotificationPreference.js";
 import WebPushSubscription from "../models/WebPushSubscription.js";
 import SecurityNotification from "../models/SecurityNotification.js";
@@ -95,17 +96,9 @@ const startSession = async (req, res, user, authMethod = "password") => {
     : false;
   const sessionId = await createSession(req, user._id, Boolean(existingDevice), authMethod);
   const token = jwt.sign({ id: user._id, sessionId }, process.env.JWT_SECRET, { expiresIn: "1d" });
-  let location = null;
-  try {
-    const geoip = (await import("geoip-lite")).default;
-    if (ip) location = geoip.lookup(ip);
-  } catch {
-    // Geolocation is optional and must never affect a valid sign-in.
-  }
+  const geolocation = resolveClientLocation(req.ip);
   const details = describeUserAgent(userAgent);
-  const approximateLocation = location && (location.city || location.region || location.country)
-    ? [location.city, location.region, location.country].filter(Boolean).join(", ")
-    : "Unknown location";
+  const approximateLocation = formatLocation(geolocation);
   try {
     await LoginEvent.create({
       user: user._id, sessionId, occurredAt: new Date(), ip: ip || undefined,
