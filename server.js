@@ -45,15 +45,20 @@ await connectDB();
 await initializeAdmin();
 
 const app = express();
-const trustedProxy = process.env.TRUSTED_PROXY;
-app.set(
-  "trust proxy",
-  trustedProxy
-    ? /^\d+$/.test(trustedProxy)
+const trustedProxy = process.env.TRUSTED_PROXY?.trim();
+const trustProxySetting = trustedProxy
+  ? trustedProxy.toLowerCase() === "false"
+    ? false
+    : /^\d+$/.test(trustedProxy)
       ? Number(trustedProxy)
       : trustedProxy.split(",").map((value) => value.trim()).filter(Boolean)
-    : false,
-);
+  : process.env.NODE_ENV === "production"
+    ? 1
+    : false;
+
+// Render terminates HTTPS at its proxy. Trust one hop in production by default;
+// override with TRUSTED_PROXY if your deployment has a different topology.
+app.set("trust proxy", trustProxySetting);
 const httpServer = http.createServer(app);
 
 const clientOrigins = process.env.CLIENT_ORIGINS
