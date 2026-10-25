@@ -43,6 +43,13 @@ export const isPublicIp = (value) => {
     lower.startsWith("2001:10:") || lower.startsWith("ff"));
 };
 
+// Return only a valid public client IP; local, private, reserved, and malformed
+// addresses should not be stored as a reliable public IP.
+export const getReliableClientIp = (value) => {
+  const ip = normalizeIp(value);
+  return ip && isPublicIp(ip) ? ip : null;
+};
+
 const emptyLocation = (ip, source = "unavailable") => ({
   ip: ip || null, country: null, countryCode: null, region: null, city: null,
   timezone: null, latitude: null, longitude: null, source,
