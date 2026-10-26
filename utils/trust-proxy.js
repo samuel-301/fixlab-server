@@ -1,13 +1,20 @@
 import { isPublicIp, normalizeIp } from "./geolocation.js";
 
 const parseExplicitTrustProxy = (value) => {
+  // Missing environment variables must not become the literal strings
+  // "undefined" or "null", which Express would try to parse as IP addresses.
+  if (value == null) return null;
+
   const trustedProxy = String(value).trim();
-  if (!trustedProxy) return null;
+  if (!trustedProxy || /^(undefined|null)$/i.test(trustedProxy)) return null;
   if (trustedProxy.toLowerCase() === "false") return false;
   if (trustedProxy.toLowerCase() === "true") return true;
   if (/^\d+$/.test(trustedProxy)) return Number(trustedProxy);
+
   const list = trustedProxy.split(",").map((entry) => entry.trim()).filter(Boolean);
-  return list.length ? list : null;
+  // Reject placeholder values instead of passing them to Express as IPs.
+  if (!list.length || list.some((entry) => /^(undefined|null)$/i.test(entry))) return null;
+  return list;
 };
 
 /**
