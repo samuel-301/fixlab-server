@@ -29,7 +29,7 @@ import {
   sendResetEmail,
 } from "../utils/email.js";
 import { sendSecurityNotifications } from "../utils/security-notifications.js";
-import { formatLocation, getRequestClientIp, resolveClientLocation } from "../utils/geolocation.js";
+import { formatLocation, getRequestClientIp, resolveClientLocationAsync } from "../utils/geolocation.js";
 import NotificationPreference from "../models/NotificationPreference.js";
 import WebPushSubscription from "../models/WebPushSubscription.js";
 import SecurityNotification from "../models/SecurityNotification.js";
@@ -49,7 +49,7 @@ const createSession = async (req, userId, isRecognizedDevice = false, authMethod
   const ip = getRequestClientIp(req);
   const userAgent = typeof req.get("user-agent") === "string" ? req.get("user-agent") : "";
   const details = describeUserAgent(userAgent);
-  const geolocation = resolveClientLocation(ip);
+  const geolocation = await resolveClientLocationAsync(ip);
   const location = formatLocation(geolocation);
 
   const session = new Session({
