@@ -7,6 +7,7 @@ import { isSecurityEmailConfigured } from "../utils/email.js";
 import SecurityNotification from "../models/SecurityNotification.js";
 import Session from "../models/Session.js";
 import LoginEvent from "../models/LoginEvent.js";
+import { storedLocationFrom } from "../utils/geolocation.js";
 
 export const getSecurityNotifications = async (req, res) => {
   const limit = Math.min(50, Math.max(1, Number.parseInt(req.query.limit, 10) || 20));
@@ -17,7 +18,10 @@ export const getSecurityNotifications = async (req, res) => {
       SecurityNotification.find(filter).sort({ createdAt: -1 }).limit(limit).lean(),
       SecurityNotification.countDocuments({ user: req.user._id, readAt: null }),
     ]);
-    res.json({ items: items.map((item) => ({ id: String(item._id), title: item.title, message: item.message, createdAt: item.createdAt, read: Boolean(item.readAt), href: "/dashboard/sessions", details: { location: item.location, browser: item.browser, platform: item.platform, device: item.device, authMethod: item.authMethod } })), unreadCount, nextBefore: items.length === limit ? items[items.length - 1].createdAt : null });
+    res.json({ items: items.map((item) => {
+      const { location, geolocation } = storedLocationFrom(item);
+      return { id: String(item._id), title: item.title, message: item.message, createdAt: item.createdAt, read: Boolean(item.readAt), href: "/dashboard/sessions", details: { location, geolocation, browser: item.browser, platform: item.platform, device: item.device, authMethod: item.authMethod } };
+    }), unreadCount, nextBefore: items.length === limit ? items[items.length - 1].createdAt : null });
   } catch { res.status(500).json({ message: "Unable to load notifications." }); }
 };
 
@@ -41,7 +45,10 @@ export const getLoginEvents = async (req, res) => {
     const sessionIds = events.map((event) => event.sessionId);
     const activeSessions = await Session.find({ user: req.user._id, sessionId: { $in: sessionIds } }).select("sessionId").lean();
     const active = new Set(activeSessions.map((session) => session.sessionId));
-    res.json(events.map((event) => ({ ...event, active: active.has(event.sessionId), location: event.location || "Unknown location", authMethod: event.authMethod || "password", isNewDevice: event.isNewDevice !== false })));
+    res.json(events.map((event) => {
+      const { location, geolocation } = storedLocationFrom(event);
+      return { ...event, active: active.has(event.sessionId), location, geolocation, authMethod: event.authMethod || "password", isNewDevice: event.isNewDevice !== false };
+    }));
   } catch { res.status(500).json({ message: "Unable to load login activity." }); }
 };
 

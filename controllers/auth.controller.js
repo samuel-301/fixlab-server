@@ -29,7 +29,7 @@ import {
   sendResetEmail,
 } from "../utils/email.js";
 import { sendSecurityNotifications } from "../utils/security-notifications.js";
-import { resolveClientLocation, formatLocation } from "../utils/geolocation.js";
+import { formatLocation, getRequestClientIp, resolveClientLocation } from "../utils/geolocation.js";
 import NotificationPreference from "../models/NotificationPreference.js";
 import WebPushSubscription from "../models/WebPushSubscription.js";
 import SecurityNotification from "../models/SecurityNotification.js";
@@ -38,7 +38,6 @@ import { compareAdminPassword, validateAdminConfiguration } from "../services/ad
 import {
   buildSessionResponse,
   describeUserAgent,
-  getReliableClientIp,
   revokeOtherSessions,
   revokeOwnedSession,
   SESSION_ID_PATTERN,
@@ -47,14 +46,18 @@ import {
 // Utility to extract session data
 const createSession = async (req, userId, isRecognizedDevice = false, authMethod = "password") => {
   const sessionId = uuidv4();
-  const ip = getReliableClientIp(req.ip);
+  const ip = getRequestClientIp(req);
   const userAgent = typeof req.get("user-agent") === "string" ? req.get("user-agent") : "";
   const details = describeUserAgent(userAgent);
+  const geolocation = resolveClientLocation(ip);
+  const location = formatLocation(geolocation);
 
   const session = new Session({
     user: userId,
     sessionId,
     ip: ip || undefined,
+    location: geolocation.display || undefined,
+    geolocation,
     userAgent,
     device: details.device,
     platform: details.platform,
@@ -65,7 +68,7 @@ const createSession = async (req, userId, isRecognizedDevice = false, authMethod
   });
 
   await session.save();
-  return sessionId;
+  return { sessionId, ip, geolocation, location, details };
 };
 
 const authCookieOptions = () => {
@@ -86,7 +89,6 @@ const authCookieOptions = () => {
 };
 
 const startSession = async (req, res, user, authMethod = "password") => {
-  const ip = getReliableClientIp(req.ip);
   const userAgent = typeof req.get("user-agent") === "string" ? req.get("user-agent") : "";
   // IP changes are common (mobile networks, VPNs, travel) and are not enough
   // to classify a sign-in as a new device. Use the browser/device signature
@@ -94,15 +96,12 @@ const startSession = async (req, res, user, authMethod = "password") => {
   const existingDevice = userAgent
     ? await Session.exists({ user: user._id, userAgent, createdAt: { $gte: new Date(Date.now() - 365 * 24 * 60 * 60 * 1000) } })
     : false;
-  const sessionId = await createSession(req, user._id, Boolean(existingDevice), authMethod);
+  const { sessionId, ip, geolocation, location, details } = await createSession(req, user._id, Boolean(existingDevice), authMethod);
   const token = jwt.sign({ id: user._id, sessionId }, process.env.JWT_SECRET, { expiresIn: "1d" });
-  const geolocation = resolveClientLocation(req.ip);
-  const details = describeUserAgent(userAgent);
-  const approximateLocation = formatLocation(geolocation);
   try {
     await LoginEvent.create({
       user: user._id, sessionId, occurredAt: new Date(), ip: ip || undefined,
-      location: approximateLocation, browser: details.browserName, platform: details.platform,
+      location, geolocation, browser: details.browserName, platform: details.platform,
       device: details.device, authMethod, isNewDevice: !existingDevice,
     });
   } catch (error) {
@@ -120,7 +119,8 @@ const startSession = async (req, res, user, authMethod = "password") => {
     browser: details.browserName,
     platform: details.platform,
     authMethod,
-    location: approximateLocation,
+    location,
+    geolocation,
     sessionsUrl,
   }, sessionId).catch(() => console.warn("Login security notification recording failed"));
   return sessionId;

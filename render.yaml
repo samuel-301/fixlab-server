@@ -8,6 +8,8 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      - key: TRUSTED_PROXY
+        value: "private-hops"
       - key: MONGO_URI
         sync: false
       - key: JWT_SECRET

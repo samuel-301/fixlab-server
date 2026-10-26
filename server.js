@@ -44,21 +44,16 @@ const { initializeAdmin } = await import('./services/admin-initialization.js');
 await connectDB();
 await initializeAdmin();
 
+const { resolveTrustProxySetting } = await import("./utils/trust-proxy.js");
+const { getGeoIpDatabaseStatus } = await import("./utils/geolocation.js");
 const app = express();
-const trustedProxy = process.env.TRUSTED_PROXY?.trim();
-const trustProxySetting = trustedProxy
-  ? trustedProxy.toLowerCase() === "false"
-    ? false
-    : /^\d+$/.test(trustedProxy)
-      ? Number(trustedProxy)
-      : trustedProxy.split(",").map((value) => value.trim()).filter(Boolean)
-  : process.env.NODE_ENV === "production"
-    ? 1
-    : false;
+const trustProxySetting = resolveTrustProxySetting();
 
-// Render terminates HTTPS at its proxy. Trust one hop in production by default;
-// override with TRUSTED_PROXY if your deployment has a different topology.
+// Render terminates TLS at its reverse proxy. Trust the connecting peer plus
+// extra private hops, then stop at the first public client address.
+// Override with TRUSTED_PROXY for a custom hop count or proxy IP list.
 app.set("trust proxy", trustProxySetting);
+console.info("[geoip]", { status: "database_" + getGeoIpDatabaseStatus(), trustProxy: typeof trustProxySetting === "function" ? "private-hops" : trustProxySetting });
 const httpServer = http.createServer(app);
 
 const clientOrigins = process.env.CLIENT_ORIGINS

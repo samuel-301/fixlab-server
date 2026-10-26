@@ -18,7 +18,7 @@ const retryDelivery = async (send, onAttempt, maxAttempts = 3) => {
 };
 
 export const sendSecurityNotifications = async (user, details, eventId) => {
-  const location = formatLocation(details.geolocation || (details.location && details.location !== "Unknown location" ? { city: details.location } : null));
+  const location = formatLocation(details.geolocation || details.location);
   const notificationDetails = { ...details, location };
   const preference = await NotificationPreference.findOne({ user: user._id }).lean().catch(() => null);
   const notification = await SecurityNotification.create({
@@ -58,7 +58,7 @@ export const sendSecurityNotifications = async (user, details, eventId) => {
     deliveries.push(retryDelivery(async () => {
       const result = await sendLoginPushNotifications(user._id, buildLoginPushPayload({
       device: details.device,
-      location: details.location,
+      location,
       time: details.time,
       notificationId: notification._id,
       }));

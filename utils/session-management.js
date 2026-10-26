@@ -1,9 +1,9 @@
 import useragent from "useragent";
-import { getReliableClientIp, resolveClientLocation, formatLocation } from "./geolocation.js";
+import { getReliableClientIp, storedLocationFrom } from "./geolocation.js";
 
 export const SESSION_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-export { getReliableClientIp } from "./geolocation.js";
+export { getReliableClientIp, getRequestClientIp } from "./geolocation.js";
 
 const readableBrowserName = (family) => {
   if (!family || family === "Other") return "Unknown browser";
@@ -49,35 +49,28 @@ export const describeUserAgent = (userAgentString) => {
 };
 
 export const buildSessionResponse = (session, currentSessionId) => {
-  const savedLocation = session.geolocation && typeof session.geolocation === "object"
-    ? session.geolocation
-    : null;
-  const resolved = savedLocation && (savedLocation.city || savedLocation.country)
-    ? savedLocation
-    : resolveClientLocation(session.ip);
-  const ip = resolved.ip || getReliableClientIp(session.ip);
-  const location = session.location && session.location !== "Unavailable" && session.location !== "Unknown location"
-    ? session.location
-    : formatLocation(resolved);
-  const detected = describeUserAgent(session.userAgent);
+  const record = session && typeof session.toObject === "function" ? session.toObject() : session || {};
+  const { geolocation, location } = storedLocationFrom(record);
+  const ip = geolocation.ip || getReliableClientIp(record.ip);
+  const detected = describeUserAgent(record.userAgent);
 
   return {
-    _id: session._id,
-    sessionId: session.sessionId,
+    _id: record._id,
+    sessionId: record.sessionId,
     ip: ip || "Unavailable",
     location,
-    geolocation: resolved,
+    geolocation,
     browser: detected.browser,
     browserName: detected.browserName,
     platform: detected.platform,
     device: detected.device,
     deviceType: detected.deviceType,
-    authMethod: session.authMethod || "password",
-    isNewDevice: session.isNewDevice !== false,
-    createdAt: session.createdAt,
-    lastActive: session.lastActive || session.updatedAt || session.createdAt,
-    isCurrent: session.sessionId === currentSessionId,
-    isRecognizedDevice: session.isRecognizedDevice === true,
+    authMethod: record.authMethod || "password",
+    isNewDevice: record.isNewDevice !== false,
+    createdAt: record.createdAt,
+    lastActive: record.lastActive || record.updatedAt || record.createdAt,
+    isCurrent: record.sessionId === currentSessionId,
+    isRecognizedDevice: record.isRecognizedDevice === true,
   };
 };
 
