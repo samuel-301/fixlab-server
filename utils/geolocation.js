@@ -2,6 +2,7 @@ import { isIP } from "node:net";
 import geoip from "geoip-lite";
 
 const cache = new Map();
+
 const CACHE_TTL_MS = Math.max(60_000, Number(process.env.GEOIP_CACHE_TTL_MS) || 6 * 60 * 60 * 1000);
 const MAX_CACHE_SIZE = 5000;
 const UNAVAILABLE_LABELS = new Set([
@@ -244,3 +245,64 @@ export const getGeoIpDatabaseStatus = () => {
 };
 
 export const clearGeoIpCacheForTests = () => cache.clear();
+
+const remoteCache = new Map();
+const GEOLOCATION_API_TIMEOUT_MS = Math.min(
+  8000,
+  Math.max(1000, Number(process.env.GEOLOCATION_API_TIMEOUT_MS) || 4000),
+);
+
+const lookupRemoteGeo = async (ip) => {
+  const cached = remoteCache.get(ip);
+  if (cached && cached.expiresAt > Date.now()) return { ...cached.value };
+
+  const url = new URL(`https://ipwho.is/${encodeURIComponent(ip)}`);
+  url.searchParams.set("fields", "success,message,country,country_code,region,city,timezone,latitude,longitude");
+  try {
+    const response = await fetch(url, { signal: AbortSignal.timeout(GEOLOCATION_API_TIMEOUT_MS), headers: { accept: "application/json" } });
+    if (!response.ok) {
+      logDiagnostic("api_http_error");
+      return null;
+    }
+    const data = await response.json();
+    if (data?.success !== true) {
+      logDiagnostic("api_lookup_failed");
+      return null;
+    }
+    const countryCode = textOrNull(data.country_code);
+    const location = {
+      ip,
+      country: countryName(data.country) || countryName(countryCode),
+      countryCode: countryCode ? countryCode.toUpperCase() : null,
+      region: textOrNull(data.region),
+      city: textOrNull(data.city),
+      timezone: textOrNull(data.timezone),
+      latitude: Number.isFinite(data.latitude) ? data.latitude : null,
+      longitude: Number.isFinite(data.longitude) ? data.longitude : null,
+      display: null,
+      source: "ipwho.is",
+    };
+    const display = formatLocation(location);
+    location.display = display === "Location unavailable" ? null : display;
+    if (!location.country && !location.region && !location.city) return null;
+    if (remoteCache.size >= MAX_CACHE_SIZE) remoteCache.delete(remoteCache.keys().next().value);
+    remoteCache.set(ip, { value: { ...location }, expiresAt: Date.now() + CACHE_TTL_MS });
+    logDiagnostic(location.city ? "api_city_lookup_success" : location.region ? "api_region_lookup_success" : "api_country_lookup_success");
+    return location;
+  } catch (error) {
+    logDiagnostic(error?.name === "TimeoutError" || error?.name === "AbortError" ? "api_timeout" : "api_unavailable");
+    return null;
+  }
+};
+
+/**
+ * Resolve location through the hosted IP geolocation API first, with the
+ * bundled geoip-lite database as a no-network fallback.
+ */
+export const resolveClientLocationAsync = async (value) => {
+  const ip = getReliableClientIp(value);
+  if (!normalizeIp(value) || !ip) return resolveClientLocation(value);
+  const remote = await lookupRemoteGeo(ip);
+  if (remote) return remote;
+  return resolveClientLocation(ip);
+};
