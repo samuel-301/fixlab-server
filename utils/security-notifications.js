@@ -28,6 +28,9 @@ export const sendSecurityNotifications = async (user, details, eventId) => {
     message: `Successful ${details.authMethod === "google" ? "Google" : details.authMethod === "password" ? "email and password" : "verified email"} sign-in near ${location} using ${details.browser || details.device || "an unknown browser or device"}.`,
     location,
     geolocation: details.geolocation,
+    locationMethod: details.locationMethod || details.geolocation?.method || "unavailable",
+    locationCapturedAt: details.locationCapturedAt ? new Date(details.locationCapturedAt) : undefined,
+    locationAccuracyMeters: details.locationAccuracyMeters ?? undefined,
     browser: details.browser || "Unknown browser",
     platform: details.platform || "Unknown platform",
     device: details.device || "Unknown device",
@@ -39,7 +42,7 @@ export const sendSecurityNotifications = async (user, details, eventId) => {
   if (socketServer && preference?.pushEnabled === true) socketServer.to(`user:${user._id}`).emit("security-notification", {
     id: String(notification._id), title: notification.title, message: notification.message,
     createdAt: notification.createdAt, read: false, href: "/dashboard/sessions",
-    details: { location: notification.location, browser: notification.browser, platform: notification.platform, device: notification.device, authMethod: notification.authMethod },
+    details: { location: notification.location, geolocation: notification.geolocation, locationMethod: notification.locationMethod, locationCapturedAt: notification.locationCapturedAt, locationAccuracyMeters: notification.locationAccuracyMeters, browser: notification.browser, platform: notification.platform, device: notification.device, authMethod: notification.authMethod },
   });
   const deliveries = [];
   if (user.email && user.emailVerified === true && preference?.emailLoginAlerts !== false && isSecurityEmailConfigured()) {
