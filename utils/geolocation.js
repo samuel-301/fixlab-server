@@ -309,13 +309,18 @@ const lookupRemoteGeo = async (ip) => {
 };
 
 /**
- * Resolve location through the hosted IP geolocation API first, with the
- * bundled geoip-lite database as a no-network fallback.
+ * Resolve location exclusively through the hosted IP geolocation API.
+ * If the provider is missing, fails, times out, rate-limits, or returns no
+ * usable location, report unavailable rather than substituting a local
+ * geoip-lite database result that could mislead users.
  */
 export const resolveClientLocationAsync = async (value) => {
+  const normalizedIp = normalizeIp(value);
   const ip = getReliableClientIp(value);
-  if (!normalizeIp(value) || !ip) return resolveClientLocation(value);
+  if (!normalizedIp || !ip) {
+    logDiagnostic("ip2location_unavailable_no_public_ip");
+    return emptyLocation(null, "unavailable");
+  }
   const remote = await lookupRemoteGeo(ip);
-  if (remote) return remote;
-  return resolveClientLocation(ip);
+  return remote || emptyLocation(ip, "unavailable");
 };
