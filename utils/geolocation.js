@@ -286,8 +286,8 @@ const lookupRemoteGeo = async (ip) => {
       region: textOrNull(details.state_prov),
       city: textOrNull(details.city),
       timezone: textOrNull(data?.time_zone?.name),
-      latitude: Number.isFinite(details.latitude) ? details.latitude : null,
-      longitude: Number.isFinite(details.longitude) ? details.longitude : null,
+      latitude: Number.isFinite(Number(details.latitude)) ? Number(details.latitude) : null,
+      longitude: Number.isFinite(Number(details.longitude)) ? Number(details.longitude) : null,
       display: null,
       source: "ipgeolocation.io",
     };
@@ -314,8 +314,16 @@ const lookupRemoteGeo = async (ip) => {
  * return unavailable rather than falling back to a local GeoIP database.
  */
 export const resolveClientLocationAsync = async (value) => {
+  const normalized = normalizeIp(value);
   const ip = getReliableClientIp(value);
-  if (!normalizeIp(value) || !ip) return emptyLocation(null, "unavailable");
+  if (!normalized) {
+    logDiagnostic("missing_or_invalid_client_ip");
+    return emptyLocation(null, "unavailable");
+  }
+  if (!ip) {
+    logDiagnostic("client_ip_not_public");
+    return emptyLocation(null, "unavailable");
+  }
   const remote = await lookupRemoteGeo(ip);
   return remote || emptyLocation(ip, "unavailable");
 };
