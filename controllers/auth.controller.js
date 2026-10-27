@@ -49,7 +49,31 @@ const createSession = async (req, userId, isRecognizedDevice = false, authMethod
   const ip = getRequestClientIp(req);
   const userAgent = typeof req.get("user-agent") === "string" ? req.get("user-agent") : "";
   const details = describeUserAgent(userAgent);
-  const geolocation = await resolveClientLocationAsync(ip);
+  const suppliedLocation = req.body?.browserLocation;
+  const latitude = Number(suppliedLocation?.latitude);
+  const longitude = Number(suppliedLocation?.longitude);
+  const accuracy = Number(suppliedLocation?.accuracy);
+  const capturedAtMs = Number(suppliedLocation?.timestamp);
+  const ageMs = Date.now() - capturedAtMs;
+  const validBrowserLocation = suppliedLocation
+    && Number.isFinite(latitude) && latitude >= -90 && latitude <= 90
+    && Number.isFinite(longitude) && longitude >= -180 && longitude <= 180
+    && Number.isFinite(accuracy) && accuracy >= 1 && accuracy <= 100000
+    && Number.isFinite(capturedAtMs) && ageMs >= -60000 && ageMs <= 10 * 60 * 1000;
+  const geolocation = validBrowserLocation
+    ? {
+        ip: null, country: null, countryCode: null, region: null, city: null, timezone: null,
+        latitude, longitude, accuracyMeters: Math.round(accuracy),
+        capturedAt: new Date(capturedAtMs).toISOString(),
+        display: "Precise browser location (±" + Math.round(accuracy) + " m)",
+        source: "browser-geolocation", method: "browser-geolocation",
+      }
+    : {
+        ...(await resolveClientLocationAsync(ip)),
+        method: "ip-geolocation",
+        accuracyMeters: null,
+        capturedAt: new Date().toISOString(),
+      };
   const location = formatLocation(geolocation);
 
   const session = new Session({
@@ -58,6 +82,9 @@ const createSession = async (req, userId, isRecognizedDevice = false, authMethod
     ip: ip || undefined,
     location: geolocation.display || undefined,
     geolocation,
+    locationMethod: geolocation.method,
+    locationCapturedAt: geolocation.capturedAt ? new Date(geolocation.capturedAt) : undefined,
+    locationAccuracyMeters: geolocation.accuracyMeters ?? undefined,
     userAgent,
     device: details.device,
     platform: details.platform,
@@ -101,7 +128,10 @@ const startSession = async (req, res, user, authMethod = "password") => {
   try {
     await LoginEvent.create({
       user: user._id, sessionId, occurredAt: new Date(), ip: ip || undefined,
-      location, geolocation, browser: details.browserName, platform: details.platform,
+      location, geolocation, locationMethod: geolocation.method,
+      locationCapturedAt: geolocation.capturedAt ? new Date(geolocation.capturedAt) : undefined,
+      locationAccuracyMeters: geolocation.accuracyMeters ?? undefined,
+      browser: details.browserName, platform: details.platform,
       device: details.device, authMethod, isNewDevice: !existingDevice,
     });
   } catch (error) {
@@ -121,6 +151,9 @@ const startSession = async (req, res, user, authMethod = "password") => {
     authMethod,
     location,
     geolocation,
+    locationMethod: geolocation.method,
+    locationCapturedAt: geolocation.capturedAt,
+    locationAccuracyMeters: geolocation.accuracyMeters,
     sessionsUrl,
   }, sessionId).catch(() => console.warn("Login security notification recording failed"));
   return sessionId;
