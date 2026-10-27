@@ -50,7 +50,15 @@ export const describeUserAgent = (userAgentString) => {
 
 export const buildSessionResponse = (session, currentSessionId) => {
   const record = session && typeof session.toObject === "function" ? session.toObject() : session || {};
-  const { geolocation, location } = storedLocationFrom(record);
+  // Never re-resolve missing historical locations from a local database.
+  // A new session's IPGeolocation.io result is the only trusted source.
+  const savedGeo = record.geolocation && typeof record.geolocation === "object" ? record.geolocation : {};
+  const usableSavedLocation = savedGeo.source === "ipgeolocation.io"
+    && Boolean(savedGeo.city || savedGeo.region || savedGeo.country || savedGeo.countryCode || savedGeo.display);
+  const location = usableSavedLocation
+    ? (savedGeo.display || [savedGeo.city, savedGeo.region, savedGeo.country].filter(Boolean).join(", ") || "unavailable")
+    : "unavailable";
+  const geolocation = usableSavedLocation ? savedGeo : { ...savedGeo, display: null, source: "unavailable" };
   const ip = geolocation.ip || getReliableClientIp(record.ip);
   const detected = describeUserAgent(record.userAgent);
 
