@@ -27,12 +27,15 @@ export const sendSecurityNotifications = async (user, details, eventId) => {
     display: location,
   } : undefined;
   const notificationDetails = { ...details, location, geolocation: safeGeolocation };
+  const locationMethod = details.locationMethod || details.geolocation?.method || "unavailable";
+  const locationSourceLabel = locationMethod === "browser-geolocation" ? "device location" : locationMethod === "ip-geolocation" ? "approximate IP location" : "location unavailable";
+  const accuracyText = typeof details.locationAccuracyMeters === "number" ? ` (±${Math.round(details.locationAccuracyMeters)} m)` : "";
   const preference = await NotificationPreference.findOne({ user: user._id }).lean().catch(() => null);
   const notification = await SecurityNotification.create({
     user: user._id,
     sessionId: eventId,
     title: "New login detected",
-    message: `Successful ${details.authMethod === "google" ? "Google" : details.authMethod === "password" ? "email and password" : "verified email"} sign-in near ${location} using ${details.browser || details.device || "an unknown browser or device"}.`,
+    message: `Successful ${details.authMethod === "google" ? "Google" : details.authMethod === "password" ? "email and password" : "verified email"} sign-in. Location: ${location} (${locationSourceLabel}${accuracyText}). Captured at ${details.locationCapturedAt || details.time || "an unknown time"} UTC. Device: ${details.browser || details.device || "an unknown browser or device"}.`,
     location,
     locationMethod: details.locationMethod || details.geolocation?.method || "unavailable",
     locationCapturedAt: details.locationCapturedAt ? new Date(details.locationCapturedAt) : undefined,
