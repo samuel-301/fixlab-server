@@ -69,15 +69,15 @@ const createSession = async (req, userId, isRecognizedDevice = false, authMethod
         ip: null, country: null, countryCode: null, region: null, city: null, timezone: null,
         latitude, longitude, accuracyMeters: Math.round(accuracy),
         capturedAt: new Date(capturedAtMs).toISOString(),
-        display: "Precise browser location (±" + Math.round(accuracy) + " m)",
+        display: "Browser/device coordinates (±" + Math.round(accuracy) + " m)",
         source: "browser-geolocation", method: "browser-geolocation",
       }
-    : {
-        ...(await resolveClientLocationAsync(ip)),
-        method: "ip-geolocation",
+    : await resolveClientLocationAsync(ip).then((resolved) => ({
+        ...resolved,
+        method: resolved.display ? "ip-geolocation" : "unavailable",
         accuracyMeters: null,
         capturedAt: new Date().toISOString(),
-      };
+      }));
   const location = formatLocation(geolocation);
 
   const session = new Session({
