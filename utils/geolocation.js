@@ -258,14 +258,13 @@ const lookupRemoteGeo = async (ip) => {
 
   const apiKey = process.env.IPGEOLOCATION_API_KEY?.trim();
   if (!apiKey) {
-    logDiagnostic("ip2location_api_key_missing");
+    logDiagnostic("ipgeolocation_api_key_missing");
     return null;
   }
 
-  const url = new URL("https://api.ip2location.io/");
-  url.searchParams.set("key", apiKey);
+  const url = new URL("https://api.ipgeolocation.io/v3/ipgeo");
+  url.searchParams.set("apiKey", apiKey);
   url.searchParams.set("ip", ip);
-  url.searchParams.set("format", "json");
 
   try {
     const response = await fetch(url, {
@@ -273,49 +272,50 @@ const lookupRemoteGeo = async (ip) => {
       headers: { accept: "application/json" },
     });
     if (!response.ok) {
-      logDiagnostic(response.status === 429 ? "ip2location_rate_limited" : "ip2location_http_error");
+      logDiagnostic(response.status === 429 ? "ipgeolocation_rate_limited" : "ipgeolocation_http_error");
       return null;
     }
 
     const data = await response.json();
-    const countryCode = textOrNull(data.country_code);
+    const details = data?.location && typeof data.location === "object" ? data.location : {};
+    const countryCode = textOrNull(details.country_code2);
     const location = {
       ip,
-      country: countryName(data.country_name) || countryName(countryCode),
+      country: countryName(details.country_name) || countryName(countryCode),
       countryCode: countryCode ? countryCode.toUpperCase() : null,
-      region: textOrNull(data.region_name),
-      city: textOrNull(data.city_name),
-      timezone: textOrNull(data.time_zone),
-      latitude: Number.isFinite(data.latitude) ? data.latitude : null,
-      longitude: Number.isFinite(data.longitude) ? data.longitude : null,
+      region: textOrNull(details.state_prov),
+      city: textOrNull(details.city),
+      timezone: textOrNull(data?.time_zone?.name),
+      latitude: Number.isFinite(details.latitude) ? details.latitude : null,
+      longitude: Number.isFinite(details.longitude) ? details.longitude : null,
       display: null,
-      source: "ip2location.io",
+      source: "ipgeolocation.io",
     };
     const display = formatLocation(location);
     location.display = display === "Location unavailable" ? null : display;
     if (!location.country && !location.region && !location.city) {
-      logDiagnostic("ip2location_no_location_data");
+      logDiagnostic("ipgeolocation_no_location_data");
       return null;
     }
 
     if (remoteCache.size >= MAX_CACHE_SIZE) remoteCache.delete(remoteCache.keys().next().value);
     remoteCache.set(ip, { value: { ...location }, expiresAt: Date.now() + CACHE_TTL_MS });
-    logDiagnostic(location.city ? "ip2location_city_lookup_success" : location.region ? "ip2location_region_lookup_success" : "ip2location_country_lookup_success");
+    logDiagnostic(location.city ? "ipgeolocation_city_lookup_success" : location.region ? "ipgeolocation_region_lookup_success" : "ipgeolocation_country_lookup_success");
     return location;
   } catch (error) {
-    logDiagnostic(error?.name === "TimeoutError" || error?.name === "AbortError" ? "ip2location_timeout" : "ip2location_unavailable");
+    logDiagnostic(error?.name === "TimeoutError" || error?.name === "AbortError" ? "ipgeolocation_timeout" : "ipgeolocation_unavailable");
     return null;
   }
 };
 
 /**
- * Resolve location through the hosted IP geolocation API first, with the
- * bundled geoip-lite database as a no-network fallback.
+ * Resolve location only through IPGeolocation.io.
+ * If the provider is missing, errors, times out, or has no usable location,
+ * return unavailable rather than falling back to a local GeoIP database.
  */
 export const resolveClientLocationAsync = async (value) => {
   const ip = getReliableClientIp(value);
-  if (!normalizeIp(value) || !ip) return resolveClientLocation(value);
+  if (!normalizeIp(value) || !ip) return emptyLocation(null, "unavailable");
   const remote = await lookupRemoteGeo(ip);
-  if (remote) return remote;
-  return resolveClientLocation(ip);
+  return remote || emptyLocation(ip, "unavailable");
 };
