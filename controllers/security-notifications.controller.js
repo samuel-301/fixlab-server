@@ -20,7 +20,7 @@ export const getSecurityNotifications = async (req, res) => {
     ]);
     res.json({ items: items.map((item) => {
       const { location, geolocation } = storedLocationFrom(item);
-      return { id: String(item._id), title: item.title, message: item.message, createdAt: item.createdAt, read: Boolean(item.readAt), href: "/dashboard/sessions", details: { location, geolocation, browser: item.browser, platform: item.platform, device: item.device, authMethod: item.authMethod } };
+      return { id: String(item._id), title: item.title, message: item.message, createdAt: item.createdAt, read: Boolean(item.readAt), href: "/dashboard/sessions", details: { location, locationMethod: item.locationMethod || item.geolocation?.method || "unavailable", locationCapturedAt: item.locationCapturedAt || item.geolocation?.capturedAt || null, locationAccuracyMeters: item.locationAccuracyMeters ?? item.geolocation?.accuracyMeters ?? null, browser: item.browser, platform: item.platform, device: item.device, authMethod: item.authMethod } };
     }), unreadCount, nextBefore: items.length === limit ? items[items.length - 1].createdAt : null });
   } catch { res.status(500).json({ message: "Unable to load notifications." }); }
 };
@@ -47,7 +47,7 @@ export const getLoginEvents = async (req, res) => {
     const active = new Set(activeSessions.map((session) => session.sessionId));
     res.json(events.map((event) => {
       const { location, geolocation } = storedLocationFrom(event);
-      return { ...event, active: active.has(event.sessionId), location, geolocation, authMethod: event.authMethod || "password", isNewDevice: event.isNewDevice !== false };
+      return { ...event, active: active.has(event.sessionId), location, geolocation, locationMethod: event.locationMethod || geolocation.method || geolocation.source || "unavailable", locationCapturedAt: event.locationCapturedAt || geolocation.capturedAt || null, locationAccuracyMeters: event.locationAccuracyMeters ?? geolocation.accuracyMeters ?? null, authMethod: event.authMethod || "password", isNewDevice: event.isNewDevice !== false };
     }));
   } catch { res.status(500).json({ message: "Unable to load login activity." }); }
 };
