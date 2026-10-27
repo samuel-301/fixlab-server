@@ -42,9 +42,9 @@ export const validPushSubscription = (value) => {
     typeof value.keys?.auth === "string" && /^[A-Za-z0-9_-]{16,100}$/.test(value.keys.auth);
 };
 
-export const buildLoginPushPayload = ({ device, location, time, notificationId }) => JSON.stringify({
+export const buildLoginPushPayload = ({ device, location, time, notificationId, locationMethod, locationAccuracyMeters }) => JSON.stringify({
   title: "FixLab — New sign-in detected",
-  body: `A new sign-in to your FixLab account was detected near ${String(location || "Location unavailable").slice(0, 100)}, using ${String(device || "an unknown browser or device").slice(0, 120)} at ${String(time || "Time unavailable").slice(0, 40)} UTC. If this wasn't you, review your account security.`,
+  body: `A new sign-in to FixLab was detected near ${String(location || "Location unavailable").slice(0, 100)} (${locationMethod === "browser-geolocation" ? "device location" : locationMethod === "ip-geolocation" ? "approximate IP location" : "location unavailable"}${typeof locationAccuracyMeters === "number" ? `, ±${Math.round(locationAccuracyMeters)} m` : ""}), using ${String(device || "an unknown browser or device").slice(0, 120)} at ${String(time || "Time unavailable").slice(0, 40)} UTC. If this wasn't you, review your account security.`,
   url: "/dashboard/sessions",
   tag: notificationId ? `fixlab-${String(notificationId).slice(0, 80)}` : "fixlab-login-security",
 });

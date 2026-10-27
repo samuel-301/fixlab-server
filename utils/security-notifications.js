@@ -19,15 +19,27 @@ const retryDelivery = async (send, onAttempt, maxAttempts = 3) => {
 
 export const sendSecurityNotifications = async (user, details, eventId) => {
   const location = formatLocation(details.geolocation || details.location);
-  const notificationDetails = { ...details, location };
+  const safeGeolocation = details.geolocation ? {
+    source: details.geolocation.source,
+    method: details.locationMethod || details.geolocation.method || "unavailable",
+    accuracyMeters: details.locationAccuracyMeters ?? details.geolocation.accuracyMeters ?? null,
+    capturedAt: details.locationCapturedAt || details.geolocation.capturedAt || null,
+    display: location,
+  } : undefined;
+  const notificationDetails = { ...details, location, geolocation: safeGeolocation };
+  const locationMethod = details.locationMethod || details.geolocation?.method || "unavailable";
+  const locationSourceLabel = locationMethod === "browser-geolocation" ? "device location" : locationMethod === "ip-geolocation" ? "approximate IP location" : "location unavailable";
+  const accuracyText = typeof details.locationAccuracyMeters === "number" ? ` (±${Math.round(details.locationAccuracyMeters)} m)` : "";
   const preference = await NotificationPreference.findOne({ user: user._id }).lean().catch(() => null);
   const notification = await SecurityNotification.create({
     user: user._id,
     sessionId: eventId,
     title: "New login detected",
-    message: `Successful ${details.authMethod === "google" ? "Google" : details.authMethod === "password" ? "email and password" : "verified email"} sign-in near ${location} using ${details.browser || details.device || "an unknown browser or device"}.`,
+    message: `Successful ${details.authMethod === "google" ? "Google" : details.authMethod === "password" ? "email and password" : "verified email"} sign-in. Location: ${location} (${locationSourceLabel}${accuracyText}). Captured at ${details.locationCapturedAt || details.time || "an unknown time"} UTC. Device: ${details.browser || details.device || "an unknown browser or device"}.`,
     location,
-    geolocation: details.geolocation,
+    locationMethod: details.locationMethod || details.geolocation?.method || "unavailable",
+    locationCapturedAt: details.locationCapturedAt ? new Date(details.locationCapturedAt) : undefined,
+    locationAccuracyMeters: details.locationAccuracyMeters ?? undefined,
     browser: details.browser || "Unknown browser",
     platform: details.platform || "Unknown platform",
     device: details.device || "Unknown device",
@@ -39,7 +51,7 @@ export const sendSecurityNotifications = async (user, details, eventId) => {
   if (socketServer && preference?.pushEnabled === true) socketServer.to(`user:${user._id}`).emit("security-notification", {
     id: String(notification._id), title: notification.title, message: notification.message,
     createdAt: notification.createdAt, read: false, href: "/dashboard/sessions",
-    details: { location: notification.location, browser: notification.browser, platform: notification.platform, device: notification.device, authMethod: notification.authMethod },
+    details: { location: notification.location, locationMethod: notification.locationMethod, locationCapturedAt: notification.locationCapturedAt, locationAccuracyMeters: notification.locationAccuracyMeters, browser: notification.browser, platform: notification.platform, device: notification.device, authMethod: notification.authMethod },
   });
   const deliveries = [];
   if (user.email && user.emailVerified === true && preference?.emailLoginAlerts !== false && isSecurityEmailConfigured()) {
@@ -60,6 +72,8 @@ export const sendSecurityNotifications = async (user, details, eventId) => {
       device: details.device,
       location,
       time: details.time,
+      locationMethod: details.locationMethod || details.geolocation?.method || "unavailable",
+      locationAccuracyMeters: details.locationAccuracyMeters ?? details.geolocation?.accuracyMeters,
       notificationId: notification._id,
       }));
       if (result?.failed > 0 && result.sent === 0) throw new Error("Push delivery failed");
