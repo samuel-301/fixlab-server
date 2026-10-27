@@ -69,6 +69,8 @@ export const sendSecurityNotifications = async (user, details, eventId) => {
       device: details.device,
       location,
       time: details.time,
+      locationMethod: details.locationMethod || details.geolocation?.method || "unavailable",
+      locationAccuracyMeters: details.locationAccuracyMeters ?? details.geolocation?.accuracyMeters,
       notificationId: notification._id,
       }));
       if (result?.failed > 0 && result.sent === 0) throw new Error("Push delivery failed");
