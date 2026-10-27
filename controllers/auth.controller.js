@@ -55,7 +55,11 @@ const createSession = async (req, userId, isRecognizedDevice = false, authMethod
   const accuracy = Number(suppliedLocation?.accuracy);
   const capturedAtMs = Number(suppliedLocation?.timestamp);
   const ageMs = Date.now() - capturedAtMs;
-  const validBrowserLocation = suppliedLocation
+  const validBrowserLocation = suppliedLocation && typeof suppliedLocation === "object"
+    && typeof suppliedLocation.latitude === "number"
+    && typeof suppliedLocation.longitude === "number"
+    && typeof suppliedLocation.accuracy === "number"
+    && typeof suppliedLocation.timestamp === "number"
     && Number.isFinite(latitude) && latitude >= -90 && latitude <= 90
     && Number.isFinite(longitude) && longitude >= -180 && longitude <= 180
     && Number.isFinite(accuracy) && accuracy >= 1 && accuracy <= 100000
