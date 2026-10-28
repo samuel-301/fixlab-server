@@ -74,17 +74,25 @@ export const getReliableClientIp = (value) => {
   return ip && isPublicIp(ip) ? ip : null;
 };
 
-export const getRequestClientIp = (req) => {
-  const raw = req == null || typeof req === "string" || typeof req === "number"
-    ? req
-    : req.ip;
-  const ip = getReliableClientIp(typeof raw === "function" ? undefined : raw);
-  if (ip) {
-    logDiagnostic("public_ip_resolved");
-    return ip;
+const firstPublicInChain = (req) => {
+  const chain = String(req.headers?.["x-forwarded-for"] || "")
+    .split(",")
+    .map((candidate) => candidate.trim())
+    .filter(Boolean);
+  for (const candidate of [...chain, req.ip]) {
+    const ip = getReliableClientIp(candidate);
+    if (ip) return ip;
   }
-  logDiagnostic(raw ? "no_public_ip_in_trusted_chain" : "invalid_or_missing_ip");
   return null;
+};
+
+export const getRequestClientIp = (req) => {
+  if (req == null || typeof req === "string" || typeof req === "number") {
+    return getReliableClientIp(req) || null;
+  }
+  const ip = firstPublicInChain(req);
+  logDiagnostic(ip ? "public_ip_resolved" : "no_public_ip_in_trusted_chain");
+  return ip;
 };
 
 const emptyLocation = (ip, source = "unavailable") => ({
@@ -223,15 +231,18 @@ export const resolveClientLocation = (value, lookup) => {
 
 export const storedLocationFrom = ({ geolocation, location, ip } = {}) => {
   const saved = geolocation && typeof geolocation === "object" ? geolocation : null;
-  if (saved && (saved.city || saved.region || saved.country || saved.countryCode || (saved.display && !isPlaceholderLocation(saved.display)))) {
+  if (saved) {
     const display = formatLocation(saved);
-    return { geolocation: { ...emptyLocation(saved.ip || getReliableClientIp(ip), saved.source || "stored"), ...saved, display }, location: display };
+    return {
+      geolocation: { ...emptyLocation(saved.ip || getReliableClientIp(ip), saved.source || "unavailable"), ...saved, display: display === "Location unavailable" ? null : display },
+      location: display,
+    };
   }
-  if (!isPlaceholderLocation(location)) {
-    return { geolocation: saved || emptyLocation(getReliableClientIp(ip), "stored"), location: String(location).trim() };
-  }
-  const resolved = resolveClientLocation(ip);
-  return { geolocation: resolved, location: formatLocation(resolved) };
+  const display = formatLocation(location);
+  return {
+    geolocation: emptyLocation(getReliableClientIp(ip), "unavailable"),
+    location: display,
+  };
 };
 
 export const getGeoIpDatabaseStatus = () => {
