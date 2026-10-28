@@ -57,9 +57,9 @@ export const buildSessionResponse = (session, currentSessionId) => {
   return {
     _id: record._id,
     sessionId: record.sessionId,
-    ip: ip || "Unavailable",
-    location,
-    geolocation,
+    ip: ip || null,
+    location: location || "Location unavailable",
+    geolocation: geolocation || null,
     locationMethod: record.locationMethod || geolocation.method || geolocation.source || "unavailable",
     locationCapturedAt: record.locationCapturedAt || geolocation.capturedAt || null,
     locationAccuracyMeters: record.locationAccuracyMeters ?? geolocation.accuracyMeters ?? null,
