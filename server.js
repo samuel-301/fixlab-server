@@ -53,7 +53,9 @@ const trustProxySetting = resolveTrustProxySetting();
 // extra private hops, then stop at the first public client address.
 // Override with TRUSTED_PROXY for a custom hop count or proxy IP list.
 app.set("trust proxy", trustProxySetting);
-console.info("[geoip]", { status: "database_" + getGeoIpDatabaseStatus(), trustProxy: typeof trustProxySetting === "function" ? "private-hops" : trustProxySetting });
+console.info("[geoip] key present:", Boolean(process.env.IPGEOLOCATION_API_KEY));
+console.info("[geoip] db status:", getGeoIpDatabaseStatus());
+console.info("[geoip] trust proxy:", typeof trustProxySetting === "function" ? "private-hops" : trustProxySetting);
 const httpServer = http.createServer(app);
 
 const clientOrigins = process.env.CLIENT_ORIGINS
