@@ -290,12 +290,18 @@ const lookupRemoteGeo = async (ip) => {
 
     const data = await response.json();
     const countryCode = textOrNull(data.country_code);
+    const regionValue = textOrNull(data.region_name);
+    const cityValue = textOrNull(data.city_name);
+    if (!countryCode && !regionValue && !cityValue) {
+      logDiagnostic("ip2location_no_location_data");
+      return null;
+    }
     const location = {
       ip,
       country: countryName(data.country_name) || countryName(countryCode),
       countryCode: countryCode ? countryCode.toUpperCase() : null,
-      region: textOrNull(data.region_name),
-      city: textOrNull(data.city_name),
+      region: regionValue,
+      city: cityValue,
       timezone: textOrNull(data.time_zone),
       latitude: Number.isFinite(data.latitude) ? data.latitude : null,
       longitude: Number.isFinite(data.longitude) ? data.longitude : null,
@@ -304,11 +310,6 @@ const lookupRemoteGeo = async (ip) => {
     };
     const display = formatLocation(location);
     location.display = display === "Location unavailable" ? null : display;
-    if (!location.country && !location.region && !location.city) {
-      logDiagnostic("ip2location_no_location_data");
-      return null;
-    }
-
     if (remoteCache.size >= MAX_CACHE_SIZE) remoteCache.delete(remoteCache.keys().next().value);
     remoteCache.set(ip, { value: { ...location }, expiresAt: Date.now() + CACHE_TTL_MS });
     logDiagnostic(location.city ? "ip2location_city_lookup_success" : location.region ? "ip2location_region_lookup_success" : "ip2location_country_lookup_success");
