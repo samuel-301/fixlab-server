@@ -63,7 +63,7 @@ const createSession = async (req, userId, isRecognizedDevice = false, authMethod
     user: userId,
     sessionId,
     ip: ip || undefined,
-    location: geolocation.display || undefined,
+    location,
     geolocation,
     locationMethod: geolocation.method,
     locationCapturedAt: geolocation.capturedAt ? new Date(geolocation.capturedAt) : undefined,
