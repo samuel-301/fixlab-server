@@ -231,17 +231,18 @@ export const resolveClientLocation = (value, lookup) => {
 
 export const storedLocationFrom = ({ geolocation, location, ip } = {}) => {
   const saved = geolocation && typeof geolocation === "object" ? geolocation : null;
-  if (saved) {
+  // Only data explicitly returned by IP2Location is eligible for display.
+  // Legacy geoip-lite records and records without a known provider are unavailable.
+  if (saved && saved.source === "ip2location.io") {
     const display = formatLocation(saved);
     return {
-      geolocation: { ...emptyLocation(saved.ip || getReliableClientIp(ip), saved.source || "unavailable"), ...saved, display: display === "Location unavailable" ? null : display },
+      geolocation: { ...emptyLocation(saved.ip || getReliableClientIp(ip), saved.source), ...saved, display: display === "Location unavailable" ? null : display },
       location: display,
     };
   }
-  const display = formatLocation(location);
   return {
     geolocation: emptyLocation(getReliableClientIp(ip), "unavailable"),
-    location: display,
+    location: "Location unavailable",
   };
 };
 
