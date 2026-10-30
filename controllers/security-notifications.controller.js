@@ -32,25 +32,30 @@ export const getCurrentLoginNotification = async (req, res) => {
       sessionId: req.sessionId,
       type: "login",
     }).lean();
-    if (!item) return res.json({ item: null });
-    const { location } = storedLocationFrom(item);
+    const event = item ? null : await LoginEvent.findOne({
+      user: req.user._id,
+      sessionId: req.sessionId,
+    }).lean();
+    const record = item || event;
+    if (!record) return res.json({ item: null });
+    const { location } = storedLocationFrom(record);
     return res.json({
       item: {
-        id: String(item._id),
-        title: item.title,
-        message: item.message,
-        createdAt: item.createdAt,
-        read: Boolean(item.readAt),
+        id: String(item?._id || record.sessionId),
+        title: item?.title || "New login detected",
+        message: item?.message || "A new login to your FixLab account was detected. Here are the details.",
+        createdAt: item?.createdAt || event?.occurredAt || record.createdAt,
+        read: Boolean(item?.readAt),
         details: {
-          location,
-          ip: item.ip || "Unknown",
-          browser: item.browser || "Unknown browser",
-          browserVersion: item.browserVersion || "Unknown version",
-          platform: item.platform || "Unknown operating system",
-          device: item.device || "Unknown device",
-          deviceType: item.deviceType || "Unknown",
-          userAgent: item.userAgent || "Unavailable",
-          authMethod: item.authMethod,
+          location: location || "Location unavailable",
+          ip: record.ip || "Unknown",
+          browser: record.browser || "Unknown browser",
+          browserVersion: record.browserVersion || "Unknown version",
+          platform: record.platform || "Unknown operating system",
+          device: record.device || "Unknown device",
+          deviceType: record.deviceType || "Unknown",
+          userAgent: record.userAgent || "Unavailable",
+          authMethod: record.authMethod || "password",
         },
       },
     });
@@ -58,7 +63,6 @@ export const getCurrentLoginNotification = async (req, res) => {
     return res.status(500).json({ message: "Unable to load the current login alert." });
   }
 };
-
 export const getUnreadSecurityNotificationCount = async (req, res) => {
   try { res.json({ unreadCount: await SecurityNotification.countDocuments({ user: req.user._id, readAt: null }) }); }
   catch { res.status(500).json({ message: "Unable to load unread notification count." }); }
