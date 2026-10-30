@@ -2,7 +2,6 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { v4 as uuidv4 } from "uuid";
 import { deleteCloudinaryImage, getUserWithImageUrl, uploadImage } from "../config/cloudinary.js";
-import { OAuth2Client } from "google-auth-library";
 
 import User from "../models/User.js";
 import Session from "../models/Session.js";
