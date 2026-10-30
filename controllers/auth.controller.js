@@ -126,7 +126,7 @@ const startSession = async (req, res, user, authMethod = "password") => {
   }
   res.cookie("token", token, authCookieOptions());
   const sessionsUrl = (process.env.CLIENT_URL || process.env.APP_URL)
-    ? `${(process.env.CLIENT_URL || process.env.APP_URL).replace(/\/$/, "")}/dashboard/sessions`
+    ? `${(process.env.CLIENT_URL || process.env.APP_URL).replace(/\/$/, "")}/dashboard/security`
     : undefined;
   // Login notifications are best-effort and never block a successful sign-in.
   try {
