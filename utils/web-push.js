@@ -44,7 +44,7 @@ export const validPushSubscription = (value) => {
 };
 
 export const buildLoginPushPayload = ({ browser, platform, location, notificationId }) => JSON.stringify({
-  title: "New login detected",
+  title: "FixLab — New sign-in detected",
   body: `A new login to your FixLab account was detected from ${String(browser || "an unknown browser").slice(0, 80)} on ${String(platform || "an unknown operating system").slice(0, 80)} in ${String(location || "an unknown location").slice(0, 100)}.`,
   url: "/dashboard/security",
   tag: notificationId ? `fixlab-login-${String(notificationId).slice(0, 80)}` : "fixlab-login-security",
