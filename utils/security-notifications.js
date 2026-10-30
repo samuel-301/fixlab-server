@@ -87,27 +87,29 @@ export const sendSecurityNotifications = async (user, details, eventId) => {
   // Email is automatic and independent of browser push preferences. Failure
   // is recorded but never affects the completed authentication/session.
   if (user.email && user.emailVerified === true && isSecurityEmailConfigured()) {
-    try {
-      await sendSecurityAlert(user.email, user.username, {
-        ...details,
-        time: safeOccurredAt.toISOString(),
-        dateTime,
-        timezone,
-        location,
-        ip: details.ip || "Unknown",
-        browser,
-        browserVersion,
-        platform,
-        device,
-        deviceType,
-        userAgent,
-        sessionsUrl: details.sessionsUrl,
-      }, eventId);
-      await SecurityNotification.updateOne({ _id: notification._id }, { $set: { emailStatus: "sent", emailAttempts: 1 } });
-    } catch {
-      await SecurityNotification.updateOne({ _id: notification._id }, { $set: { emailStatus: "failed", emailAttempts: 1 } }).catch(() => {});
-      console.warn("Login security email delivery failed");
-    }
+    void (async () => {
+      try {
+        await sendSecurityAlert(user.email, user.username, {
+          ...details,
+          time: safeOccurredAt.toISOString(),
+          dateTime,
+          timezone,
+          location,
+          ip: details.ip || "Unknown",
+          browser,
+          browserVersion,
+          platform,
+          device,
+          deviceType,
+          userAgent,
+          sessionsUrl: details.sessionsUrl,
+        }, eventId);
+        await SecurityNotification.updateOne({ _id: notification._id }, { $set: { emailStatus: "sent", emailAttempts: 1 } });
+      } catch {
+        await SecurityNotification.updateOne({ _id: notification._id }, { $set: { emailStatus: "failed", emailAttempts: 1 } }).catch(() => {});
+        console.warn("Login security email delivery failed");
+      }
+    })();
   }
   return notification;
 };
