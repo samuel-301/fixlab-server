@@ -129,29 +129,25 @@ const startSession = async (req, res, user, authMethod = "password") => {
     ? `${(process.env.CLIENT_URL || process.env.APP_URL).replace(/\/$/, "")}/dashboard/security`
     : undefined;
   // Login notifications are best-effort and never block a successful sign-in.
-  try {
-    // Persist the in-app alert before returning the successful login response,
-    // so the dashboard can fetch it immediately after redirect.
-    await sendSecurityNotifications(user, {
-      time: new Date().toISOString(),
-      ip: ip || undefined,
-      userAgent: userAgent.slice(0, 500),
-      device: details.device,
-      deviceType: details.deviceType,
-      browser: details.browserName,
-      browserVersion: details.browserVersion,
-      platform: details.platform,
-      authMethod,
-      location,
-      geolocation,
-      locationMethod: geolocation.method,
-      locationCapturedAt: geolocation.capturedAt,
-      locationAccuracyMeters: geolocation.accuracyMeters,
-      sessionsUrl,
-    }, sessionId);
-  } catch {
-    console.warn("Login security notification recording failed");
-  }
+  // Security notification persistence and delivery are best-effort; never
+  // hold up a valid login response if the notification system is unavailable.
+  void sendSecurityNotifications(user, {
+    time: new Date().toISOString(),
+    ip: ip || undefined,
+    userAgent: userAgent.slice(0, 500),
+    device: details.device,
+    deviceType: details.deviceType,
+    browser: details.browserName,
+    browserVersion: details.browserVersion,
+    platform: details.platform,
+    authMethod,
+    location,
+    geolocation,
+    locationMethod: geolocation.method,
+    locationCapturedAt: geolocation.capturedAt,
+    locationAccuracyMeters: geolocation.accuracyMeters,
+    sessionsUrl,
+  }, sessionId).catch(() => console.warn("Login security notification recording failed"));
   return sessionId;
 };
 
