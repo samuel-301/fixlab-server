@@ -34,6 +34,7 @@ import {
   registerWebPushSubscription,
   removeWebPushSubscription,
   getSecurityNotifications,
+  getCurrentLoginNotification,
   getUnreadSecurityNotificationCount,
   markSecurityNotificationRead,
   getLoginEvents,
@@ -62,6 +63,7 @@ router.get("/sessions", requireAuth, getMySessions);
 router.get("/security-notifications", requireAuth, getSecurityNotificationSettings);
 router.get("/security-notifications/subscriptions/current", requireAuth, getCurrentWebPushSubscription);
 router.get("/notifications", requireAuth, getSecurityNotifications);
+router.get("/notifications/current-login", requireAuth, getCurrentLoginNotification);
 router.get("/notifications/unread-count", requireAuth, getUnreadSecurityNotificationCount);
 router.patch("/notifications/:id/read", requireSameOrigin, requireAuth, markSecurityNotificationRead);
 router.get("/security/login-events", requireAuth, getLoginEvents);
