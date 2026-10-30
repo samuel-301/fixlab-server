@@ -14,6 +14,8 @@ const sessionSchema = new mongoose.Schema(
     device: String,
     platform: String,
     browser: String,
+    browserVersion: { type: String, maxlength: 80 },
+    deviceType: { type: String, maxlength: 40 },
     authMethod: { type: String, enum: ["password", "google", "email-link"], default: "password" },
     isNewDevice: { type: Boolean, default: true },
     isRecognizedDevice: { type: Boolean, default: false },
