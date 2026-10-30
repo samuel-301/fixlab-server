@@ -45,7 +45,7 @@ await connectDB();
 await initializeAdmin();
 
 const { resolveTrustProxySetting } = await import("./utils/trust-proxy.js");
-const { getGeoIpDatabaseStatus } = await import("./utils/geolocation.js");
+const { getGeoIpProviderStatus } = await import("./utils/geolocation.js");
 const app = express();
 const trustProxySetting = resolveTrustProxySetting();
 
@@ -53,8 +53,7 @@ const trustProxySetting = resolveTrustProxySetting();
 // extra private hops, then stop at the first public client address.
 // Override with TRUSTED_PROXY for a custom hop count or proxy IP list.
 app.set("trust proxy", trustProxySetting);
-console.info("[geoip] key present:", Boolean(process.env.IPGEOLOCATION_API_KEY));
-console.info("[geoip] db status:", getGeoIpDatabaseStatus());
+console.info("[geoip] IPinfo token:", getGeoIpProviderStatus());
 console.info("[geoip] trust proxy:", typeof trustProxySetting === "function" ? "private-hops" : trustProxySetting);
 const httpServer = http.createServer(app);
 
