@@ -1,7 +1,6 @@
 import { isSecurityEmailConfigured, sendSecurityAlert } from "./email.js";
 import SecurityNotification from "../models/SecurityNotification.js";
 import { formatLocation } from "./geolocation.js";
-import { buildLoginPushPayload, sendLoginPushNotifications } from "./web-push.js";
 
 export const sendSecurityNotifications = async (user, details, eventId) => {
   const occurredAt = details.time ? new Date(details.time) : new Date();
@@ -51,7 +50,7 @@ export const sendSecurityNotifications = async (user, details, eventId) => {
       userAgent: userAgent || undefined,
       authMethod: details.authMethod || "password",
       emailStatus: user.email && user.emailVerified === true && isSecurityEmailConfigured() ? "pending" : "skipped",
-      pushStatus: "pending",
+      pushStatus: "skipped",
     });
   } catch (error) {
     if (error?.code === 11000) {
@@ -60,30 +59,8 @@ export const sendSecurityNotifications = async (user, details, eventId) => {
     throw error;
   }
 
-  // Native Web Push is the primary login alert. It is queued after the
-  // durable login event is recorded and never blocks authentication.
-  void (async () => {
-    try {
-      const payload = buildLoginPushPayload({
-        browser: `${browser} ${browserVersion}`,
-        platform,
-        location,
-        notificationId: notification._id,
-      });
-      const result = await sendLoginPushNotifications(user._id, payload);
-      const status = result.sent > 0 ? "sent" : result.failed > 0 ? "failed" : "skipped";
-      await SecurityNotification.updateOne(
-        { _id: notification._id },
-        { $set: { pushStatus: status, pushAttempts: result.sent + result.failed } },
-      );
-    } catch {
-      await SecurityNotification.updateOne(
-        { _id: notification._id },
-        { $set: { pushStatus: "failed", pushAttempts: 1 } },
-      ).catch(() => {});
-      console.warn("Login push notification delivery failed");
-    }
-  })();
+  // Browser Notifications API is triggered by the signed-in frontend.
+  // This backend intentionally does not require VAPID keys or a push provider.
 
   // Email is automatic and independent of browser push preferences. Failure
   // is recorded but never affects the completed authentication/session.
