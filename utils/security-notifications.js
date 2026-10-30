@@ -1,6 +1,7 @@
 import { isSecurityEmailConfigured, sendSecurityAlert } from "./email.js";
 import SecurityNotification from "../models/SecurityNotification.js";
 import { formatLocation } from "./geolocation.js";
+import { buildLoginPushPayload, sendLoginPushNotifications } from "./web-push.js";
 
 export const sendSecurityNotifications = async (user, details, eventId) => {
   const occurredAt = details.time ? new Date(details.time) : new Date();
@@ -50,7 +51,7 @@ export const sendSecurityNotifications = async (user, details, eventId) => {
       userAgent: userAgent || undefined,
       authMethod: details.authMethod || "password",
       emailStatus: user.email && user.emailVerified === true && isSecurityEmailConfigured() ? "pending" : "skipped",
-      pushStatus: "skipped",
+      pushStatus: "pending",
     });
   } catch (error) {
     if (error?.code === 11000) {
@@ -59,30 +60,30 @@ export const sendSecurityNotifications = async (user, details, eventId) => {
     throw error;
   }
 
-  const socketServer = global.io;
-  if (socketServer) {
-    socketServer.to(`user:${user._id}`).emit("security-notification", {
-      id: String(notification._id),
-      title: notification.title,
-      message: notification.message,
-      createdAt: notification.createdAt,
-      read: false,
-      href: "/dashboard/sessions",
-      details: {
-        location,
-        ip,
-        browser,
-        browserVersion,
+  // Native Web Push is the primary login alert. It is queued after the
+  // durable login event is recorded and never blocks authentication.
+  void (async () => {
+    try {
+      const payload = buildLoginPushPayload({
+        browser: `${browser} ${browserVersion}`,
         platform,
-        device,
-        deviceType,
-        userAgent,
-        dateTime,
-        timezone,
-        authMethod: notification.authMethod,
-      },
-    });
-  }
+        location,
+        notificationId: notification._id,
+      });
+      const result = await sendLoginPushNotifications(user._id, payload);
+      const status = result.sent > 0 ? "sent" : result.failed > 0 ? "failed" : "skipped";
+      await SecurityNotification.updateOne(
+        { _id: notification._id },
+        { $set: { pushStatus: status, pushAttempts: result.sent + result.failed } },
+      );
+    } catch {
+      await SecurityNotification.updateOne(
+        { _id: notification._id },
+        { $set: { pushStatus: "failed", pushAttempts: 1 } },
+      ).catch(() => {});
+      console.warn("Login push notification delivery failed");
+    }
+  })();
 
   // Email is automatic and independent of browser push preferences. Failure
   // is recorded but never affects the completed authentication/session.
