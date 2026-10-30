@@ -1,7 +1,5 @@
 import { isIP } from "node:net";
 
-const cache = new Map();
-
 const CACHE_TTL_MS = Math.max(60_000, Number(process.env.GEOIP_CACHE_TTL_MS) || 6 * 60 * 60 * 1000);
 const MAX_CACHE_SIZE = 5000;
 const UNAVAILABLE_LABELS = new Set([
@@ -167,11 +165,6 @@ export const formatLocation = (location) => {
   return "Location unavailable";
 };
 
-const cacheValue = (ip, value) => {
-  if (cache.size >= MAX_CACHE_SIZE) cache.delete(cache.keys().next().value);
-  cache.set(ip, { value: { ...value }, expiresAt: Date.now() + CACHE_TTL_MS });
-};
-
 export const storedLocationFrom = ({ geolocation, location, ip } = {}) => {
   const saved = geolocation && typeof geolocation === "object" ? geolocation : null;
   // Preserve historical IP2Location snapshots while accepting new IPinfo snapshots.
@@ -193,7 +186,7 @@ export const getGeoIpProviderStatus = () => (
   process.env.IPINFO_TOKEN?.trim() ? "configured" : "unconfigured"
 );
 
-export const clearGeoIpCacheForTests = () => { cache.clear(); remoteCache.clear(); };
+export const clearGeoIpCacheForTests = () => remoteCache.clear();
 
 const remoteCache = new Map();
 const GEOLOCATION_API_TIMEOUT_MS = Math.min(
