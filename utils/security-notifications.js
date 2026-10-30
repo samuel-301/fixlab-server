@@ -1,91 +1,113 @@
-import NotificationPreference from "../models/NotificationPreference.js";
 import { isSecurityEmailConfigured, sendSecurityAlert } from "./email.js";
-import { buildLoginPushPayload, sendLoginPushNotifications } from "./web-push.js";
 import SecurityNotification from "../models/SecurityNotification.js";
 import { formatLocation } from "./geolocation.js";
 
-const retryDelivery = async (send, onAttempt, maxAttempts = 3) => {
-  let lastError;
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    await onAttempt(attempt);
-    try { return await send(); }
-    catch (error) {
-      lastError = error;
-      if (attempt < maxAttempts) await new Promise((resolve) => setTimeout(resolve, 500 * (2 ** (attempt - 1))));
+export const sendSecurityNotifications = async (user, details, eventId) => {
+  const occurredAt = details.time ? new Date(details.time) : new Date();
+  const safeOccurredAt = Number.isNaN(occurredAt.getTime()) ? new Date() : occurredAt;
+  const location = formatLocation(details.geolocation || details.location) || "Location unavailable";
+  const browser = details.browser || "Unknown browser";
+  const browserVersion = details.browserVersion || "Unknown version";
+  const platform = details.platform || "Unknown operating system";
+  const device = details.device || "Unknown device";
+  const deviceType = details.deviceType || "Unknown";
+  const ip = details.ip || "Unknown";
+  const userAgent = typeof details.userAgent === "string" ? details.userAgent.slice(0, 500) : "";
+  const timezone = (() => {
+    try { return new Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"; }
+    catch { return "UTC"; }
+  })();
+  const dateTime = new Intl.DateTimeFormat("en", {
+    dateStyle: "medium",
+    timeStyle: "long",
+    timeZone: timezone,
+  }).format(safeOccurredAt);
+
+  // The unique sessionId index makes one successful login produce at most one
+  // persistent notification and one email, including concurrent retries.
+  let notification;
+  try {
+    notification = await SecurityNotification.create({
+      user: user._id,
+      sessionId: eventId,
+      title: "New login detected",
+      message: "A new login to your FixLab account was detected. Here are the details.",
+      location,
+      ip: details.ip || undefined,
+      geolocation: details.geolocation ? {
+        source: details.geolocation.source,
+        method: details.locationMethod || details.geolocation.method || "unavailable",
+        display: location,
+        capturedAt: details.locationCapturedAt || details.geolocation.capturedAt || null,
+      } : undefined,
+      locationMethod: details.locationMethod || details.geolocation?.method || "unavailable",
+      locationCapturedAt: details.locationCapturedAt ? new Date(details.locationCapturedAt) : undefined,
+      browser,
+      browserVersion,
+      platform,
+      device,
+      deviceType,
+      userAgent: userAgent || undefined,
+      authMethod: details.authMethod || "password",
+      emailStatus: user.email && user.emailVerified === true && isSecurityEmailConfigured() ? "pending" : "skipped",
+      pushStatus: "skipped",
+    });
+  } catch (error) {
+    if (error?.code === 11000) {
+      return SecurityNotification.findOne({ sessionId: eventId, user: user._id });
+    }
+    throw error;
+  }
+
+  const socketServer = global.io;
+  if (socketServer) {
+    socketServer.to(`user:${user._id}`).emit("security-notification", {
+      id: String(notification._id),
+      title: notification.title,
+      message: notification.message,
+      createdAt: notification.createdAt,
+      read: false,
+      href: "/dashboard/sessions",
+      details: {
+        location,
+        ip,
+        browser,
+        browserVersion,
+        platform,
+        device,
+        deviceType,
+        userAgent,
+        dateTime,
+        timezone,
+        authMethod: notification.authMethod,
+      },
+    });
+  }
+
+  // Email is automatic and independent of browser push preferences. Failure
+  // is recorded but never affects the completed authentication/session.
+  if (user.email && user.emailVerified === true && isSecurityEmailConfigured()) {
+    try {
+      await sendSecurityAlert(user.email, user.username, {
+        ...details,
+        time: safeOccurredAt.toISOString(),
+        dateTime,
+        timezone,
+        location,
+        ip: details.ip || "Unknown",
+        browser,
+        browserVersion,
+        platform,
+        device,
+        deviceType,
+        userAgent,
+        sessionsUrl: details.sessionsUrl,
+      }, eventId);
+      await SecurityNotification.updateOne({ _id: notification._id }, { $set: { emailStatus: "sent", emailAttempts: 1 } });
+    } catch {
+      await SecurityNotification.updateOne({ _id: notification._id }, { $set: { emailStatus: "failed", emailAttempts: 1 } }).catch(() => {});
+      console.warn("Login security email delivery failed");
     }
   }
-  throw lastError;
-};
-
-export const sendSecurityNotifications = async (user, details, eventId) => {
-  const location = formatLocation(details.geolocation || details.location);
-  const safeGeolocation = details.geolocation ? {
-    source: details.geolocation.source,
-    method: details.locationMethod || details.geolocation.method || "unavailable",
-    accuracyMeters: details.locationAccuracyMeters ?? details.geolocation.accuracyMeters ?? null,
-    capturedAt: details.locationCapturedAt || details.geolocation.capturedAt || null,
-    display: location,
-  } : undefined;
-  const notificationDetails = { ...details, location, geolocation: safeGeolocation };
-  const locationMethod = details.locationMethod || details.geolocation?.method || "unavailable";
-  const locationSourceLabel = locationMethod === "browser-geolocation" ? "device location" : locationMethod === "ip-geolocation" ? "approximate IP location" : "location unavailable";
-  const accuracyText = typeof details.locationAccuracyMeters === "number" ? ` (±${Math.round(details.locationAccuracyMeters)} m)` : "";
-  const preference = await NotificationPreference.findOne({ user: user._id }).lean().catch(() => null);
-  const notification = await SecurityNotification.create({
-    user: user._id,
-    sessionId: eventId,
-    title: "New login detected",
-    message: `Successful ${details.authMethod === "google" ? "Google" : details.authMethod === "password" ? "email and password" : "verified email"} sign-in. Location: ${location} (${locationSourceLabel}${accuracyText}). Captured at ${details.locationCapturedAt || details.time || "an unknown time"} UTC. Device: ${details.browser || details.device || "an unknown browser or device"}.`,
-    location,
-    locationMethod: details.locationMethod || details.geolocation?.method || "unavailable",
-    locationCapturedAt: details.locationCapturedAt ? new Date(details.locationCapturedAt) : undefined,
-    locationAccuracyMeters: details.locationAccuracyMeters ?? undefined,
-    browser: details.browser || "Unknown browser",
-    platform: details.platform || "Unknown platform",
-    device: details.device || "Unknown device",
-    authMethod: details.authMethod || "password",
-    emailStatus: user.email && user.emailVerified === true && preference?.emailLoginAlerts !== false && isSecurityEmailConfigured() ? "pending" : "skipped",
-    pushStatus: preference?.pushEnabled === true ? "pending" : "skipped",
-  });
-  const socketServer = global.io;
-  if (socketServer && preference?.pushEnabled === true) socketServer.to(`user:${user._id}`).emit("security-notification", {
-    id: String(notification._id), title: notification.title, message: notification.message,
-    createdAt: notification.createdAt, read: false, href: "/dashboard/sessions",
-    details: { location: notification.location, locationMethod: notification.locationMethod, locationCapturedAt: notification.locationCapturedAt, locationAccuracyMeters: notification.locationAccuracyMeters, browser: notification.browser, platform: notification.platform, device: notification.device, authMethod: notification.authMethod },
-  });
-  const deliveries = [];
-  if (user.email && user.emailVerified === true && preference?.emailLoginAlerts !== false && isSecurityEmailConfigured()) {
-    deliveries.push(retryDelivery(
-      () => sendSecurityAlert(user.email, user.username, notificationDetails, eventId),
-      (attempt) => SecurityNotification.updateOne({ _id: notification._id }, { $set: { emailAttempts: attempt } }),
-    )
-      .then(async () => { await SecurityNotification.updateOne({ _id: notification._id }, { $set: { emailStatus: "sent" } }); return "sent"; })
-      .catch(() => {
-        console.warn("Login security email delivery failed");
-        void SecurityNotification.updateOne({ _id: notification._id }, { $set: { emailStatus: "failed" } });
-        return "failed";
-      }));
-  }
-  if (preference?.pushEnabled === true) {
-    deliveries.push(retryDelivery(async () => {
-      const result = await sendLoginPushNotifications(user._id, buildLoginPushPayload({
-      device: details.device,
-      location,
-      time: details.time,
-      locationMethod: details.locationMethod || details.geolocation?.method || "unavailable",
-      locationAccuracyMeters: details.locationAccuracyMeters ?? details.geolocation?.accuracyMeters,
-      notificationId: notification._id,
-      }));
-      if (result?.failed > 0 && result.sent === 0) throw new Error("Push delivery failed");
-      return result;
-    }, (attempt) => SecurityNotification.updateOne({ _id: notification._id }, { $set: { pushAttempts: attempt } }))
-      .then(async (result) => { await SecurityNotification.updateOne({ _id: notification._id }, { $set: { pushStatus: result?.sent > 0 ? "sent" : "skipped" } }); return result; })
-      .catch(() => {
-        console.warn("Login security push delivery failed");
-        void SecurityNotification.updateOne({ _id: notification._id }, { $set: { pushStatus: "failed" } });
-        return { failed: 1 };
-      }));
-  }
-  void Promise.allSettled(deliveries);
   return notification;
 };
