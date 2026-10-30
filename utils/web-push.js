@@ -1,5 +1,6 @@
 import webpush from "web-push";
 import WebPushSubscription from "../models/WebPushSubscription.js";
+import NotificationPreference from "../models/NotificationPreference.js";
 
 const decodeVapidKey = (value) => {
   if (typeof value !== "string" || !/^[A-Za-z0-9_-]+$/.test(value)) return null;
@@ -42,15 +43,17 @@ export const validPushSubscription = (value) => {
     typeof value.keys?.auth === "string" && /^[A-Za-z0-9_-]{16,100}$/.test(value.keys.auth);
 };
 
-export const buildLoginPushPayload = ({ device, location, time, notificationId, locationMethod, locationAccuracyMeters }) => JSON.stringify({
-  title: "FixLab — New sign-in detected",
-  body: `A new sign-in to FixLab was detected near ${String(location || "Location unavailable").slice(0, 100)} (${locationMethod === "browser-geolocation" ? "device location" : locationMethod === "ip-geolocation" ? "approximate IP location" : "location unavailable"}${typeof locationAccuracyMeters === "number" ? `, ±${Math.round(locationAccuracyMeters)} m` : ""}), using ${String(device || "an unknown browser or device").slice(0, 120)} at ${String(time || "Time unavailable").slice(0, 40)} UTC. If this wasn't you, review your account security.`,
-  url: "/dashboard/sessions",
-  tag: notificationId ? `fixlab-${String(notificationId).slice(0, 80)}` : "fixlab-login-security",
+export const buildLoginPushPayload = ({ browser, platform, location, notificationId }) => JSON.stringify({
+  title: "New login detected",
+  body: `A new login to your FixLab account was detected from ${String(browser || "an unknown browser").slice(0, 80)} on ${String(platform || "an unknown operating system").slice(0, 80)} in ${String(location || "an unknown location").slice(0, 100)}.`,
+  url: "/dashboard/security",
+  tag: notificationId ? `fixlab-login-${String(notificationId).slice(0, 80)}` : "fixlab-login-security",
+  notificationId: String(notificationId || ""),
 });
-
 export const sendLoginPushNotifications = async (userId, payload) => {
   if (!configure()) return { sent: 0, removed: 0, failed: 0, configured: false };
+  const preference = await NotificationPreference.findOne({ user: userId }).select("pushEnabled").lean();
+  if (preference?.pushEnabled !== true) return { sent: 0, removed: 0, failed: 0, configured: true, enabled: false };
   const subscriptions = await WebPushSubscription.find({ user: userId })
     .select("+endpoint +p256dh +auth");
   const results = await Promise.all(subscriptions.map(async (record) => {
