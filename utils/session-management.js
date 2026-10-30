@@ -19,6 +19,7 @@ export const describeUserAgent = (userAgentString) => {
       : "";
     const platform = parsed.os?.family && parsed.os.family !== "Other" ? parsed.os.family : "Unknown platform";
     const browser = readableBrowserName(parsed.family);
+    const browserVersion = parsed.toVersion?.() || "Unknown version";
     const knownPlatform = platform !== "Unknown platform";
     const deviceType = !deviceFamily && !knownPlatform
       ? "Unknown"
@@ -33,6 +34,7 @@ export const describeUserAgent = (userAgentString) => {
     return {
       browser: `${browser} on ${context}`,
       browserName: browser,
+      browserVersion,
       platform,
       device: deviceFamily || (deviceType === "Mobile" ? "Mobile device" : deviceType === "Tablet" ? "Tablet" : "Desktop"),
       deviceType,
@@ -41,6 +43,7 @@ export const describeUserAgent = (userAgentString) => {
     return {
       browser: "Unknown browser",
       browserName: "Unknown browser",
+      browserVersion: "Unknown version",
       platform: "Unknown platform",
       device: "Unknown device",
       deviceType: "Unknown",
