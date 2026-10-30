@@ -390,33 +390,59 @@ export const adminLogin = async (req, res) => {
 
 export const googleLogin = async (req, res) => {
   try {
-    const { credential } = req.body;
-    if (!process.env.GOOGLE_CLIENT_ID) {
+    const { code } = req.body || {};
+    const clientId = process.env.GOOGLE_CLIENT_ID;
+    const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+    const origin = req.get("origin");
+
+    if (!clientId || !clientSecret) {
       return res.status(503).json({ message: "Google sign-in is not configured." });
     }
-    if (typeof credential !== "string" || credential.length < 20 || credential.length > 10000) {
+    if (req.get("x-requested-with") !== "XmlHttpRequest") {
+      return res.status(403).json({ message: "Google sign-in request could not be verified." });
+    }
+    if (typeof code !== "string" || code.length < 10 || code.length > 4096) {
       return res.status(401).json({ message: "Google sign-in could not be verified." });
     }
+
+    const allowedOrigins = (process.env.CLIENT_ORIGINS || "https://fixlab-repair.vercel.app")
+      .split(",").map((value) => value.trim()).filter(Boolean);
+    if (!origin || !allowedOrigins.includes(origin)) {
+      return res.status(403).json({ message: "Google sign-in origin is not allowed." });
+    }
+
+    // GIS popup code flow uses the calling page's origin as redirect_uri.
+    const oauthClient = new OAuth2Client(clientId, clientSecret, origin);
+    let tokens;
+    try {
+      ({ tokens } = await oauthClient.getToken({ code, redirect_uri: origin }));
+    } catch {
+      return res.status(401).json({ message: "Google sign-in code is invalid or expired. Please try again." });
+    }
+
+    if (!tokens.id_token) {
+      return res.status(401).json({ message: "Google did not return a verified identity." });
+    }
+
     let ticket;
     try {
-      ticket = await new OAuth2Client(process.env.GOOGLE_CLIENT_ID).verifyIdToken({
-        idToken: credential,
-        audience: process.env.GOOGLE_CLIENT_ID,
-      });
+      ticket = await oauthClient.verifyIdToken({ idToken: tokens.id_token, audience: clientId });
     } catch {
       return res.status(401).json({ message: "Google sign-in could not be verified." });
     }
+
     const profile = ticket.getPayload();
     const nowSeconds = Math.floor(Date.now() / 1000);
     if (
       !profile ||
       !["accounts.google.com", "https://accounts.google.com"].includes(profile.iss) ||
-      profile.aud !== process.env.GOOGLE_CLIENT_ID ||
+      profile.aud !== clientId ||
       typeof profile.exp !== "number" || profile.exp <= nowSeconds ||
       !profile.email_verified || !profile.sub || !validEmail(profile.email)
     ) {
       return res.status(401).json({ message: "Google sign-in could not be verified." });
     }
+
     const email = normalizeEmail(profile.email);
     let user = await User.findOne({ googleSub: profile.sub });
     if (!user) {
@@ -430,7 +456,10 @@ export const googleLogin = async (req, res) => {
         await user.save();
       }
     }
-    if (user && !user.emailVerified) { user.emailVerified = true; await user.save(); }
+    if (user && !user.emailVerified) {
+      user.emailVerified = true;
+      await user.save();
+    }
     if (!user) {
       const localPart = email.split("@")[0].replace(/[^a-zA-Z0-9_.-]/g, "").slice(0, 22) || "fixlab-user";
       let username = localPart;
@@ -448,9 +477,18 @@ export const googleLogin = async (req, res) => {
       });
       void sendAccountCreatedEmail(email, username).catch(() => {});
     }
+
     await startSession(req, res, user, "google");
-    return res.json({ message: "Logged in with Google", userId: user._id, redirect: safeRedirect(req.body?.redirect) });
-  } catch {
+    return res.json({
+      message: "Logged in with Google",
+      userId: user._id,
+      redirect: safeRedirect(req.body?.redirect),
+    });
+  } catch (error) {
+    console.error("[auth-google] OAuth code exchange failed", {
+      name: String(error?.name || "Error").slice(0, 80),
+      code: String(error?.code || "").slice(0, 80),
+    });
     return res.status(500).json({ message: "Google sign-in failed. Try again." });
   }
 };
