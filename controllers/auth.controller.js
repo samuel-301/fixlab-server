@@ -71,6 +71,8 @@ const createSession = async (req, userId, isRecognizedDevice = false, authMethod
     device: details.device,
     platform: details.platform,
     browser: details.browser,
+    browserVersion: details.browserVersion,
+    deviceType: details.deviceType,
     authMethod,
     isNewDevice: !isRecognizedDevice,
     isRecognizedDevice,
@@ -111,6 +113,8 @@ const startSession = async (req, res, user, authMethod = "password") => {
     await LoginEvent.create({
       user: user._id, sessionId, occurredAt: new Date(), ip: ip || undefined,
       location, geolocation, locationMethod: geolocation.method,
+      userAgent: userAgent.slice(0, 500), browserVersion: details.browserVersion,
+      deviceType: details.deviceType,
       locationCapturedAt: geolocation.capturedAt ? new Date(geolocation.capturedAt) : undefined,
       locationAccuracyMeters: geolocation.accuracyMeters ?? undefined,
       browser: details.browserName, platform: details.platform,
@@ -124,11 +128,15 @@ const startSession = async (req, res, user, authMethod = "password") => {
   const sessionsUrl = (process.env.CLIENT_URL || process.env.APP_URL)
     ? `${(process.env.CLIENT_URL || process.env.APP_URL).replace(/\/$/, "")}/dashboard/sessions`
     : undefined;
+  // Login notifications are best-effort and never block a successful sign-in.
   void sendSecurityNotifications(user, {
-    time: new Date().toISOString().replace("T", " ").slice(0, 19),
+    time: new Date().toISOString(),
     ip: ip || undefined,
-    device: details.browser,
+    userAgent: userAgent.slice(0, 500),
+    device: details.device,
+    deviceType: details.deviceType,
     browser: details.browserName,
+    browserVersion: details.browserVersion,
     platform: details.platform,
     authMethod,
     location,
@@ -137,7 +145,7 @@ const startSession = async (req, res, user, authMethod = "password") => {
     locationCapturedAt: geolocation.capturedAt,
     locationAccuracyMeters: geolocation.accuracyMeters,
     sessionsUrl,
-  }, sessionId).catch(() => console.warn("Login security notification recording failed"));
+  }, sessionId).catch(() => console.warn("Login security notification delivery failed"));
   return sessionId;
 };
 
