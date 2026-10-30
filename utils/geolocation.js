@@ -1,7 +1,4 @@
 import { isIP } from "node:net";
-import geoip from "geoip-lite";
-
-const cache = new Map();
 
 const CACHE_TTL_MS = Math.max(60_000, Number(process.env.GEOIP_CACHE_TTL_MS) || 6 * 60 * 60 * 1000);
 const MAX_CACHE_SIZE = 5000;
@@ -168,72 +165,11 @@ export const formatLocation = (location) => {
   return "Location unavailable";
 };
 
-const cacheValue = (ip, value) => {
-  if (cache.size >= MAX_CACHE_SIZE) cache.delete(cache.keys().next().value);
-  cache.set(ip, { value: { ...value }, expiresAt: Date.now() + CACHE_TTL_MS });
-};
-
-const lookupGeo = (ip, lookup = geoip.lookup.bind(geoip)) => lookup(ip);
-
-export const resolveClientLocation = (value, lookup) => {
-  const ip = getReliableClientIp(value);
-  if (!normalizeIp(value)) {
-    logDiagnostic("invalid_or_missing_ip");
-    return emptyLocation(null, "unavailable");
-  }
-  if (!ip) {
-    logDiagnostic("private_or_reserved_ip");
-    return emptyLocation(null, "unavailable");
-  }
-
-  const cached = cache.get(ip);
-  if (cached && cached.expiresAt > Date.now()) return { ...cached.value };
-
-  try {
-    const result = lookupGeo(ip, lookup);
-    if (!result || typeof result !== "object") {
-      logDiagnostic(isIP(ip) === 6 ? "ipv6_not_in_database" : "ip_not_found");
-      const missing = emptyLocation(ip, "geoip-lite");
-      cacheValue(ip, missing);
-      return missing;
-    }
-
-    const [latitude, longitude] = Array.isArray(result.ll) ? result.ll : [];
-    const countryCode = textOrNull(result.country);
-    const location = {
-      ip,
-      country: countryName(countryCode),
-      countryCode: countryCode ? countryCode.toUpperCase() : null,
-      region: regionName(countryCode, result.region),
-      city: textOrNull(result.city),
-      timezone: textOrNull(result.timezone),
-      latitude: Number.isFinite(latitude) ? latitude : null,
-      longitude: Number.isFinite(longitude) ? longitude : null,
-      display: null,
-      source: "geoip-lite",
-    };
-    const display = formatLocation(location);
-    location.display = display === "Location unavailable" ? null : display;
-    logDiagnostic(
-      location.city ? "city_lookup_success"
-        : location.region ? "region_lookup_success"
-          : location.country ? "country_lookup_success"
-            : isIP(ip) === 6 ? "ipv6_not_in_database"
-              : "ip_not_found",
-    );
-    cacheValue(ip, location);
-    return location;
-  } catch {
-    logDiagnostic("provider_unavailable");
-    return emptyLocation(ip, "unavailable");
-  }
-};
-
 export const storedLocationFrom = ({ geolocation, location, ip } = {}) => {
   const saved = geolocation && typeof geolocation === "object" ? geolocation : null;
-  // Only data explicitly returned by IP2Location is eligible for display.
-  // Legacy geoip-lite records and records without a known provider are unavailable.
-  if (saved && saved.source === "ip2location.io") {
+  // Preserve historical IP2Location snapshots while accepting new IPinfo snapshots.
+  // Do not infer location from legacy local-database records.
+  if (saved && ["ipinfo.io", "ip2location.io"].includes(saved.source)) {
     const display = formatLocation(saved);
     return {
       geolocation: { ...emptyLocation(saved.ip || getReliableClientIp(ip), saved.source), ...saved, display: display === "Location unavailable" ? null : display },
@@ -246,17 +182,11 @@ export const storedLocationFrom = ({ geolocation, location, ip } = {}) => {
   };
 };
 
-export const getGeoIpDatabaseStatus = () => {
-  try {
-    const probe = geoip.lookup("8.8.8.8");
-    if (probe && textOrNull(probe.country)) return "ready";
-    return "unusable";
-  } catch {
-    return "unavailable";
-  }
-};
+export const getGeoIpProviderStatus = () => (
+  process.env.IPINFO_TOKEN?.trim() ? "configured" : "unconfigured"
+);
 
-export const clearGeoIpCacheForTests = () => cache.clear();
+export const clearGeoIpCacheForTests = () => remoteCache.clear();
 
 const remoteCache = new Map();
 const GEOLOCATION_API_TIMEOUT_MS = Math.min(
@@ -268,16 +198,14 @@ const lookupRemoteGeo = async (ip) => {
   const cached = remoteCache.get(ip);
   if (cached && cached.expiresAt > Date.now()) return { ...cached.value };
 
-  const apiKey = process.env.IPGEOLOCATION_API_KEY?.trim();
+  const apiKey = process.env.IPINFO_TOKEN?.trim();
   if (!apiKey) {
-    logDiagnostic("ip2location_api_key_missing");
+    logDiagnostic("ipinfo_token_missing");
     return null;
   }
 
-  const url = new URL("https://api.ip2location.io/");
-  url.searchParams.set("key", apiKey);
-  url.searchParams.set("ip", ip);
-  url.searchParams.set("format", "json");
+  const url = new URL("https://ipinfo.io/" + encodeURIComponent(ip));
+  url.searchParams.set("token", apiKey);
 
   try {
     const response = await fetch(url, {
@@ -285,44 +213,48 @@ const lookupRemoteGeo = async (ip) => {
       headers: { accept: "application/json" },
     });
     if (!response.ok) {
-      logDiagnostic(response.status === 429 ? "ip2location_rate_limited" : "ip2location_http_error");
+      logDiagnostic(response.status === 429 ? "ipinfo_rate_limited" : "ipinfo_http_error");
       return null;
     }
 
     const data = await response.json();
-    const countryCode = textOrNull(data.country_code);
-    const regionValue = textOrNull(data.region_name);
-    const cityValue = textOrNull(data.city_name);
+    // IPinfo returns city, region, country, loc, and timezone at the root.
+    const countryCode = textOrNull(data.country);
+    const regionValue = textOrNull(data.region);
+    const cityValue = textOrNull(data.city);
+    const coordinates = typeof data.loc === "string" ? data.loc.split(",") : [];
+    const latitudeValue = coordinates.length === 2 ? Number(coordinates[0]) : NaN;
+    const longitudeValue = coordinates.length === 2 ? Number(coordinates[1]) : NaN;
     if (!countryCode && !regionValue && !cityValue) {
-      logDiagnostic("ip2location_no_location_data");
+      logDiagnostic("ipinfo_no_location_data");
       return null;
     }
     const location = {
       ip,
-      country: countryName(data.country_name) || countryName(countryCode),
+      country: countryName(countryCode),
       countryCode: countryCode ? countryCode.toUpperCase() : null,
       region: regionValue,
       city: cityValue,
-      timezone: textOrNull(data.time_zone),
-      latitude: Number.isFinite(data.latitude) ? data.latitude : null,
-      longitude: Number.isFinite(data.longitude) ? data.longitude : null,
+      timezone: textOrNull(data.timezone),
+      latitude: Number.isFinite(latitudeValue) ? latitudeValue : null,
+      longitude: Number.isFinite(longitudeValue) ? longitudeValue : null,
       display: null,
-      source: "ip2location.io",
+      source: "ipinfo.io",
     };
     const display = formatLocation(location);
     location.display = display === "Location unavailable" ? null : display;
     if (remoteCache.size >= MAX_CACHE_SIZE) remoteCache.delete(remoteCache.keys().next().value);
     remoteCache.set(ip, { value: { ...location }, expiresAt: Date.now() + CACHE_TTL_MS });
-    logDiagnostic(location.city ? "ip2location_city_lookup_success" : location.region ? "ip2location_region_lookup_success" : "ip2location_country_lookup_success");
+    logDiagnostic(location.city ? "ipinfo_city_lookup_success" : location.region ? "ipinfo_region_lookup_success" : "ipinfo_country_lookup_success");
     return location;
   } catch (error) {
-    logDiagnostic(error?.name === "TimeoutError" || error?.name === "AbortError" ? "ip2location_timeout" : "ip2location_unavailable");
+    logDiagnostic(error?.name === "TimeoutError" || error?.name === "AbortError" ? "ipinfo_timeout" : "ipinfo_unavailable");
     return null;
   }
 };
 
 /**
- * Resolve location exclusively through the hosted IP geolocation API.
+ * Resolve location exclusively through the hosted IPinfo geolocation API.
  * If the provider is missing, fails, times out, rate-limits, or returns no
  * usable location, report unavailable rather than substituting a local
  * geoip-lite database result that could mislead users.
@@ -331,7 +263,7 @@ export const resolveClientLocationAsync = async (value) => {
   const normalizedIp = normalizeIp(value);
   const ip = getReliableClientIp(value);
   if (!normalizedIp || !ip) {
-    logDiagnostic("ip2location_unavailable_no_public_ip");
+    logDiagnostic("ipinfo_unavailable_no_public_ip");
     return emptyLocation(null, "unavailable");
   }
   const remote = await lookupRemoteGeo(ip);
