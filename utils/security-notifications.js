@@ -1,6 +1,7 @@
 import { isSecurityEmailConfigured, sendSecurityAlert } from "./email.js";
 import SecurityNotification from "../models/SecurityNotification.js";
 import { formatLocation } from "./geolocation.js";
+import { buildLoginPushPayload, sendLoginPushNotifications } from "./web-push.js";
 
 export const sendSecurityNotifications = async (user, details, eventId) => {
   const occurredAt = details.time ? new Date(details.time) : new Date();
@@ -59,8 +60,34 @@ export const sendSecurityNotifications = async (user, details, eventId) => {
     throw error;
   }
 
-  // Browser Notifications API is triggered by the signed-in frontend.
-  // This backend intentionally does not require VAPID keys or a push provider.
+  // Deliver real background Web Push to every registered device. This is
+  // best-effort and must never block or roll back a successful authentication.
+  try {
+    const pushResult = await sendLoginPushNotifications(
+      user._id,
+      buildLoginPushPayload({
+        browser,
+        platform,
+        location,
+        notificationId: notification._id,
+      }),
+    );
+    const pushStatus = pushResult.sent > 0
+      ? "sent"
+      : pushResult.configured && pushResult.enabled
+        ? "failed"
+        : "skipped";
+    await SecurityNotification.updateOne(
+      { _id: notification._id },
+      { $set: { pushStatus, pushAttempts: pushResult.sent + pushResult.failed } },
+    );
+  } catch (error) {
+    await SecurityNotification.updateOne(
+      { _id: notification._id },
+      { $set: { pushStatus: "failed", pushAttempts: 1 } },
+    ).catch(() => {});
+    console.warn("Login security push delivery failed");
+  }
 
   // Email is automatic and independent of browser push preferences. Failure
   // is recorded but never affects the completed authentication/session.
