@@ -390,18 +390,17 @@ export const adminLogin = async (req, res) => {
 
 export const googleLogin = async (req, res) => {
   try {
-    const { code } = req.body || {};
+    const { accessToken } = req.body || {};
     const clientId = process.env.GOOGLE_CLIENT_ID;
-    const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
     const origin = req.get("origin");
 
-    if (!clientId || !clientSecret) {
+    if (!clientId) {
       return res.status(503).json({ message: "Google sign-in is not configured." });
     }
     if (req.get("x-requested-with") !== "XmlHttpRequest") {
       return res.status(403).json({ message: "Google sign-in request could not be verified." });
     }
-    if (typeof code !== "string" || code.length < 10 || code.length > 4096) {
+    if (typeof accessToken !== "string" || accessToken.length < 20 || accessToken.length > 8192) {
       return res.status(401).json({ message: "Google sign-in could not be verified." });
     }
 
@@ -411,36 +410,56 @@ export const googleLogin = async (req, res) => {
       return res.status(403).json({ message: "Google sign-in origin is not allowed." });
     }
 
-    // GIS popup code flow uses the calling page's origin as redirect_uri.
-    const oauthClient = new OAuth2Client(clientId, clientSecret, origin);
-    let tokens;
+    // Validate the access token with Google's token-info endpoint, including
+    // the intended OAuth client ID and the scopes requested by FixLab.
+    let tokenInfo;
     try {
-      ({ tokens } = await oauthClient.getToken({ code, redirect_uri: origin }));
+      const tokenInfoResponse = await fetch(
+        `https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(accessToken)}`,
+        { signal: AbortSignal.timeout(8000) },
+      );
+      if (!tokenInfoResponse.ok) {
+        return res.status(401).json({ message: "Google sign-in token is invalid or expired. Please try again." });
+      }
+      tokenInfo = await tokenInfoResponse.json();
     } catch {
-      return res.status(401).json({ message: "Google sign-in code is invalid or expired. Please try again." });
+      return res.status(503).json({ message: "Google sign-in verification is temporarily unavailable." });
     }
 
-    if (!tokens.id_token) {
-      return res.status(401).json({ message: "Google did not return a verified identity." });
-    }
-
-    let ticket;
-    try {
-      ticket = await oauthClient.verifyIdToken({ idToken: tokens.id_token, audience: clientId });
-    } catch {
-      return res.status(401).json({ message: "Google sign-in could not be verified." });
-    }
-
-    const profile = ticket.getPayload();
-    const nowSeconds = Math.floor(Date.now() / 1000);
+    const grantedScopes = typeof tokenInfo.scope === "string" ? tokenInfo.scope.split(" ") : [];
     if (
-      !profile ||
-      !["accounts.google.com", "https://accounts.google.com"].includes(profile.iss) ||
-      profile.aud !== clientId ||
-      typeof profile.exp !== "number" || profile.exp <= nowSeconds ||
-      !profile.email_verified || !profile.sub || !validEmail(profile.email)
+      tokenInfo.aud !== clientId ||
+      !(Number(tokenInfo.expires_in) > 0) ||
+      !grantedScopes.includes("openid") ||
+      !grantedScopes.includes("email") ||
+      !grantedScopes.includes("profile")
     ) {
       return res.status(401).json({ message: "Google sign-in could not be verified." });
+    }
+
+    let profile;
+    try {
+      const profileResponse = await fetch("https://openidconnect.googleapis.com/v1/userinfo", {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!profileResponse.ok) {
+        return res.status(401).json({ message: "Google account details could not be verified." });
+      }
+      profile = await profileResponse.json();
+    } catch {
+      return res.status(503).json({ message: "Google account verification is temporarily unavailable." });
+    }
+
+    if (
+      !profile ||
+      typeof profile.sub !== "string" ||
+      !profile.sub ||
+      typeof profile.email !== "string" ||
+      !profile.email_verified ||
+      !validEmail(profile.email)
+    ) {
+      return res.status(401).json({ message: "Google account could not be verified." });
     }
 
     const email = normalizeEmail(profile.email);
@@ -485,7 +504,7 @@ export const googleLogin = async (req, res) => {
       redirect: safeRedirect(req.body?.redirect),
     });
   } catch (error) {
-    console.error("[auth-google] OAuth code exchange failed", {
+    console.error("[auth-google] OAuth token verification failed", {
       name: String(error?.name || "Error").slice(0, 80),
       code: String(error?.code || "").slice(0, 80),
     });
