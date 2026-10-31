@@ -25,6 +25,10 @@ jobs:
         node-version: ${{ matrix.node-version }}
         cache: 'npm'
     - run: npm ci
+    - name: Validate backend syntax
+      run: node --check server.js
+    - name: Run backend tests
+      run: npm test
     - run: |
           touch .env
           echo "${{ secrets.ENV_REMOTE }}" > .env
