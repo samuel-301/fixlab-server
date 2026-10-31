@@ -11,6 +11,7 @@ import Device from "../models/Device.js";
 import Payment from "../models/Payment.js";
 import ServiceCollection from "../models/ServiceCollection.js";
 import AuthChallenge from "../models/AuthChallenge.js";
+import { sendNewDevicePush } from "../utils/push-notifications.js";
 import {
   generateOpaqueToken,
   generateOtp,
@@ -102,9 +103,32 @@ const startSession = async (req, res, user, authMethod = "password") => {
   const existingDevice = userAgent
     ? await Session.exists({ user: user._id, userAgent, createdAt: { $gte: new Date(Date.now() - 365 * 24 * 60 * 60 * 1000) } })
     : false;
-  const { sessionId } = await createSession(req, user._id, Boolean(existingDevice), authMethod);
+  const { sessionId, geolocation, location, details } = await createSession(req, user._id, Boolean(existingDevice), authMethod);
   const token = jwt.sign({ id: user._id, sessionId }, process.env.JWT_SECRET, { expiresIn: "1d" });
   res.cookie("token", token, authCookieOptions());
+
+  // Push delivery is deliberately detached from authentication success.
+  if (!existingDevice) {
+    void User.findById(user._id).select("pushEnabled").then((preferences) => {
+      if (preferences?.pushEnabled === true) {
+        return sendNewDevicePush({
+          userId: user._id,
+          sessionId,
+          device: details.device,
+          browser: details.browser,
+          location,
+          loginTime: new Date(),
+          excludeEndpoint: req.get("x-fixlab-push-endpoint"),
+        });
+      }
+    }).catch((error) => {
+      console.error("[push] notification scheduling failed", {
+        sessionId,
+        name: String(error?.name || "Error").slice(0, 60),
+        code: String(error?.code || "").slice(0, 60),
+      });
+    });
+  }
   return sessionId;
 };
 
