@@ -57,7 +57,7 @@ export const updateSecurityNotificationSettings = async (req, res) => {
 };
 
 export const getCurrentPushSubscription = async (req, res) => {
-  const endpoint = typeof req.query.endpoint === "string" ? req.query.endpoint : "";
+  const endpoint = typeof req.get("x-fixlab-push-endpoint") === "string" ? req.get("x-fixlab-push-endpoint") : "";
   if (!endpoint || endpoint.length > 2048) return res.status(400).json({ message: "A valid browser subscription endpoint is required." });
   try {
     const subscription = await PushSubscription.findOne({ user: req.user._id, endpoint }).select("_id");
