@@ -4,18 +4,12 @@ import bcrypt from "bcryptjs";
 import { OAuth2Client } from "google-auth-library";
 import User from "../models/User.js";
 import Session from "../models/Session.js";
-import SecurityNotification from "../models/SecurityNotification.js";
-import NotificationPreference from "../models/NotificationPreference.js";
-import LoginEvent from "../models/LoginEvent.js";
 import { login, googleLogin } from "../controllers/auth.controller.js";
 
 const response = () => ({ cookies: {}, statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; }, cookie(name, value) { this.cookies[name] = value; return this; } });
 const prepareSessionMocks = (t) => {
   t.mock.method(Session, "exists", async () => false);
   t.mock.method(Session.prototype, "save", async function save() { return this; });
-  t.mock.method(LoginEvent, "create", async (value) => value);
-  t.mock.method(SecurityNotification, "create", async (value) => ({ ...value, _id: "notification-1", createdAt: new Date() }));
-  t.mock.method(NotificationPreference, "findOne", () => ({ lean: async () => ({ emailLoginAlerts: false, pushEnabled: false }) }));
 };
 
 test("password login creates a session only after valid credentials", async (t) => {
