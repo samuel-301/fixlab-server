@@ -84,6 +84,7 @@ export const registerPushSubscription = async (req, res) => {
       { $set: { keys: subscription.keys, expirationTime, deviceLabel } },
       { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true },
     ).select("_id");
+    await User.updateOne({ _id: req.user._id }, { $set: { pushEnabled: true } });
     console.info("[push] subscription registered", { subscriptionId: String(saved._id), userId: String(req.user._id) });
     return res.status(201).json({ id: String(saved._id) });
   } catch (error) {
