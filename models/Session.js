@@ -19,13 +19,11 @@ const sessionSchema = new mongoose.Schema(
     authMethod: { type: String, enum: ["password", "google", "email-link"], default: "password" },
     isNewDevice: { type: Boolean, default: true },
     isRecognizedDevice: { type: Boolean, default: false },
-    alertSuppressionKey: { type: String, select: false },
     createdAt: { type: Date, default: Date.now },
     lastActive: { type: Date, default: Date.now },
   },
   { timestamps: true }
 );
 
-sessionSchema.index({ alertSuppressionKey: 1 }, { unique: true, sparse: true });
 
 export default mongoose.model("Session", sessionSchema);
