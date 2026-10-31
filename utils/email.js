@@ -20,10 +20,6 @@ const parseEmailFrom = (value) => {
   return null;
 };
 
-export const isSecurityEmailConfigured = () => Boolean(
-  process.env.BREVO_API_KEY?.trim() && parseEmailFrom(process.env.EMAIL_FROM),
-);
-
 const sendEmail = async ({ to, subject, text, html, htmlContent }) => {
   const apiKey = process.env.BREVO_API_KEY?.trim();
   const sender = parseEmailFrom(process.env.EMAIL_FROM);
@@ -182,35 +178,6 @@ export const sendResetEmail = (email, resetUrl) => sendEmail({
   text: `A password reset was requested for your FixLab account. Reset password: ${resetUrl} This link expires in 30 minutes. If you did not request this, you can ignore this email.`,
   html: brandedResetEmail(resetUrl),
 });
-
-export const sendSecurityAlert = (email, username, details, idempotencyKey) => {
-  const safeUsername = escapeHtml(username || "there");
-  const safeTime = escapeHtml(details.dateTime || details.time || "Unknown time");
-  const safeBrowserVersion = escapeHtml(details.browserVersion || "Unknown version");
-  const safeDeviceType = escapeHtml(details.deviceType || "Unknown");
-  const safeUserAgent = escapeHtml(details.userAgent || "Unavailable");
-  const safeDevice = escapeHtml(details.device);
-  const safeLocation = escapeHtml(details.location || "Location unavailable");
-  const locationMethodLabel = details.locationMethod === "browser-geolocation" ? "Browser/device location (permission granted)" : details.locationMethod === "ip-geolocation" ? "Approximate IP geolocation" : "Unavailable";
-  const safeLocationMethod = escapeHtml(locationMethodLabel);
-  const safeLocationAccuracy = typeof details.locationAccuracyMeters === "number" ? escapeHtml(`±${Math.round(details.locationAccuracyMeters)} m`) : "Not available";
-  const safeLocationCapturedAt = escapeHtml(details.locationCapturedAt || details.time || "Unavailable");
-  const safeIp = escapeHtml(details.ip || "Unavailable");
-  const safeSessionsUrl = details.sessionsUrl ? escapeHtml(details.sessionsUrl) : "";
-  const safeBrowser = escapeHtml(details.browser || details.device || "Unknown browser");
-  const safePlatform = escapeHtml(details.platform || "Unknown platform");
-  const safeMethod = escapeHtml(details.authMethod === "google" ? "Google" : details.authMethod === "password" ? "Email and password" : "Email verification");
-  const appUrl = process.env.CLIENT_URL || process.env.APP_URL || "https://fixlab-repair.vercel.app";
-  const appDomain = (() => { try { return new URL(appUrl).host; } catch { return "FixLab"; } })();
-  const logoUrl = `${appUrl.replace(/\/$/, "")}/icon.svg`;
-  return sendEmail({
-    to: email,
-    subject: "Security alert: New sign-in to your FixLab account.",
-    idempotencyKey: `login-alert/${idempotencyKey}`,
-    text: `Hello ${username || "there"}, we detected a successful sign-in to FixLab (${appDomain}) at ${details.dateTime || details.time || "Unknown time"} (${details.timezone || "timezone unavailable"}). Location: ${details.location || "Unknown location"} (${locationMethodLabel}). Location captured at: ${details.locationCapturedAt || details.time || "Unavailable"} (UTC). Accuracy: ${typeof details.locationAccuracyMeters === "number" ? `±${Math.round(details.locationAccuracyMeters)} m` : "Not available"}. Device: ${details.device || "Unknown device"} (${details.deviceType || "Unknown"}). Browser: ${details.browser || "Unknown browser"} ${details.browserVersion || "Unknown version"}. Operating system: ${details.platform || "Unknown platform"}. Device information: ${details.userAgent || "Unavailable"}. Sign-in method: ${details.authMethod === "google" ? "Google" : details.authMethod === "password" ? "Email and password" : "Email verification"}. IP address: ${details.ip || "Unavailable"}. If this was you, no action is required. If you do not recognize this activity, open FixLab using a trusted bookmark and review your sessions${details.sessionsUrl ? `: ${details.sessionsUrl}` : ""}.`,
-    html: brandedEmail("New login detected", `<p style="margin:0 0 20px"><img src="${escapeHtml(logoUrl)}" width="36" height="36" alt="FixLab" style="vertical-align:middle;margin-right:10px"><strong>FixLab</strong></p><p>Hello ${safeUsername},</p><p>We detected a successful sign-in to your FixLab account.</p><p><strong>Website:</strong> FixLab (${escapeHtml(appDomain)})<br><strong>Time:</strong> ${safeTime}<br><strong>IP address:</strong> ${safeIp}<br><strong>Location:</strong> ${safeLocation}<br><strong>Location source:</strong> ${safeLocationMethod}<br><strong>Location captured at:</strong> ${safeLocationCapturedAt}<br><strong>Reported accuracy:</strong> ${safeLocationAccuracy}<br><strong>Device:</strong> ${safeDevice}<br><strong>Browser:</strong> ${safeBrowser} (${safeBrowserVersion})<br><strong>Operating system:</strong> ${safePlatform}<br><strong>Device category:</strong> ${safeDeviceType}<br><strong>Device/user-agent:</strong> ${safeUserAgent}<br><strong>Sign-in method:</strong> ${safeMethod}<br></p><p>If this was you, no action is required.</p>${safeSessionsUrl ? `<p style="margin:28px 0"><a href="${safeSessionsUrl}" style="display:inline-block;padding:13px 20px;border-radius:8px;background:#fff;color:#08090b;font-weight:700;text-decoration:none">Review account security</a></p>` : ""}<p>If you do not recognize this activity, open FixLab using a trusted bookmark, review your active sessions, and secure your account. Never share your password or verification codes.</p>`),
-  });
-};
 
 export const sendAccountCreatedEmail = (email, username) => sendEmail({
   to: email,
