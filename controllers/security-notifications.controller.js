@@ -13,10 +13,10 @@ const validSubscription = (value) => {
       !/^[A-Za-z0-9_-]{16,64}$/.test(value.keys.auth)) return false;
   try {
     const endpoint = new URL(value.endpoint);
-    const hostname = endpoint.hostname.toLowerCase().replace(/\\.$/, "");
+    const hostname = endpoint.hostname.toLowerCase().replace(/\.$/, "");
     return endpoint.protocol === "https:" &&
       Boolean(hostname) &&
-      !isIP(hostname.replace(/^\\[|\\]$/g, "")) &&
+      !isIP(hostname.replace(/^\[|\]$/g, "")) &&
       hostname !== "localhost" &&
       !hostname.endsWith(".localhost") &&
       !hostname.endsWith(".local") &&
