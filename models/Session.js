@@ -19,6 +19,7 @@ const sessionSchema = new mongoose.Schema(
     authMethod: { type: String, enum: ["password", "google", "email-link"], default: "password" },
     isNewDevice: { type: Boolean, default: true },
     isRecognizedDevice: { type: Boolean, default: false },
+    pushNotificationSentAt: { type: Date, default: null },
     createdAt: { type: Date, default: Date.now },
     lastActive: { type: Date, default: Date.now },
   },

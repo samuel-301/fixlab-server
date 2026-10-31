@@ -28,6 +28,7 @@ import uploadP from "../middleware/profileUpload.js";
 import { requireSameOrigin } from "../middleware/requireSameOrigin.js";
 import { authenticationLimiter, emailChallengeLimiter, sessionMutationLimiter } from "../middleware/sessionRateLimiter.js";
 import { invalidateUserCache } from "../middleware/responseCache.js";
+import { getSecurityNotificationSettings, updateSecurityNotificationSettings, getCurrentPushSubscription, registerPushSubscription, removePushSubscription } from "../controllers/security-notifications.controller.js";
 const router = express.Router();
 
 router.post("/register", requireSameOrigin, authenticationLimiter, register);
@@ -51,6 +52,11 @@ router.get("/sessions/:sessionId", requireAuth, getSessionDetails);
 router.delete("/sessions/:sessionId", requireSameOrigin, requireAuth, sessionMutationLimiter, logoutSession);
 router.delete("/sessions-others", requireSameOrigin, requireAuth, sessionMutationLimiter, logoutOtherSessions);
 router.delete("/sessions-all", requireSameOrigin, requireAuth, sessionMutationLimiter, logoutFromAllSessions);
+router.get("/security-notifications", requireAuth, getSecurityNotificationSettings);
+router.patch("/security-notifications", requireSameOrigin, requireAuth, updateSecurityNotificationSettings);
+router.get("/security-notifications/subscriptions/current", requireAuth, getCurrentPushSubscription);
+router.post("/security-notifications/subscriptions", requireSameOrigin, requireAuth, registerPushSubscription);
+router.delete("/security-notifications/subscriptions/:id", requireSameOrigin, requireAuth, removePushSubscription);
 router.get("/admin/users", requireAuth, isAdmin, getAllUsers);
 
 export default router;

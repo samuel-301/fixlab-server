@@ -11,6 +11,8 @@ import Device from "../models/Device.js";
 import Payment from "../models/Payment.js";
 import ServiceCollection from "../models/ServiceCollection.js";
 import AuthChallenge from "../models/AuthChallenge.js";
+import PushSubscription from "../models/PushSubscription.js";
+import { sendNewDevicePush } from "../utils/push-notifications.js";
 import {
   generateOpaqueToken,
   generateOtp,
@@ -26,6 +28,7 @@ import {
   sendOtpEmail,
   sendPasswordChangedEmail,
   sendResetEmail,
+  sendBrevoEmail,
 } from "../utils/email.js";
 import { formatLocation, getRequestClientIp, resolveClientLocationAsync } from "../utils/geolocation.js";
 import { compareAdminPassword, validateAdminConfiguration } from "../services/admin-initialization.js";
@@ -102,9 +105,56 @@ const startSession = async (req, res, user, authMethod = "password") => {
   const existingDevice = userAgent
     ? await Session.exists({ user: user._id, userAgent, createdAt: { $gte: new Date(Date.now() - 365 * 24 * 60 * 60 * 1000) } })
     : false;
-  const { sessionId } = await createSession(req, user._id, Boolean(existingDevice), authMethod);
+  const { sessionId, location, details } = await createSession(req, user._id, Boolean(existingDevice), authMethod);
   const token = jwt.sign({ id: user._id, sessionId }, process.env.JWT_SECRET, { expiresIn: "1d" });
   res.cookie("token", token, authCookieOptions());
+
+  // Security alerts are detached from authentication so provider failures never
+  // affect a successful login. Never include credentials or session tokens.
+  if (!existingDevice) {
+    const loginTime = new Date();
+    const deviceLabel = [details.device, details.browser].filter(Boolean).join(" · ") || "Unknown device";
+    const locationLabel = typeof location === "string" && location.trim() ? location.trim().slice(0, 120) : "Location unavailable";
+    const safeHtml = (value) => String(value).replace(/[&<>"']/g, (character) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+    }[character]));
+    const timeLabel = loginTime.toLocaleString("en-US", { timeZone: "UTC", dateStyle: "medium", timeStyle: "short", timeZoneName: "short" });
+
+    if (user.emailLoginAlerts === true && user.email && process.env.BREVO_API_KEY && process.env.EMAIL_FROM) {
+      void sendBrevoEmail({
+        to: user.email,
+        subject: "New sign-in to your FixLab account",
+        htmlContent: `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#111"><h2>New sign-in to FixLab</h2><p>A new sign-in was detected on your account.</p><p><strong>Device and browser:</strong> ${safeHtml(deviceLabel)}</p><p><strong>Approximate location:</strong> ${safeHtml(locationLabel)}</p><p><strong>Time:</strong> ${safeHtml(timeLabel)}</p><p>If this wasn't you, review your active sessions and secure your account.</p></body></html>`,
+      }).then(() => {
+        console.info("[security-email] login alert sent", { userId: String(user._id), sessionId });
+      }).catch((error) => {
+        console.warn("[security-email] login alert failed", {
+          sessionId,
+          name: String(error?.name || "Error").slice(0, 60),
+          code: String(error?.code || "").slice(0, 60),
+          statusCode: Number(error?.statusCode) || undefined,
+        });
+      });
+    }
+
+    if (user.pushEnabled === true) {
+      void sendNewDevicePush({
+        userId: user._id,
+        sessionId,
+        device: details.device,
+        browser: details.browser,
+        location,
+        loginTime,
+        excludeEndpoint: req.get("x-fixlab-push-endpoint"),
+      }).catch((error) => {
+        console.error("[push] notification scheduling failed", {
+          sessionId,
+          name: String(error?.name || "Error").slice(0, 60),
+          code: String(error?.code || "").slice(0, 60),
+        });
+      });
+    }
+  }
   return sessionId;
 };
 
@@ -673,6 +723,7 @@ export const deleteAccount = async (req, res) => {
     ]);
     await Promise.all([
       Session.deleteMany({ user: userId }),
+      PushSubscription.deleteMany({ user: userId }),
       Activity.deleteMany({ user: userId }),
       Payment.deleteMany({ user: userId }),
       ServiceCollection.deleteMany({ user: userId }),
