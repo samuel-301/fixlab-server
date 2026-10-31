@@ -424,61 +424,55 @@ export const googleLogin = async (req, res) => {
       return res.status(403).json({ message: "Google sign-in origin is not allowed." });
     }
 
-    stage = "Google token-info verification";
-    let tokenInfoResponse;
+    // Google documents tokeninfo as a diagnostic endpoint and warns that
+    // requests may be throttled or intermittently fail. Do not make this
+    // extra round trip a hard dependency for sign-in: the authenticated
+    // userinfo request below is the authoritative access-token check.
+    stage = "Google token-info diagnostic";
     try {
-      tokenInfoResponse = await fetch(
+      const tokenInfoResponse = await fetch(
         `https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(accessToken)}`,
-        { signal: AbortSignal.timeout(8000) },
+        { signal: AbortSignal.timeout(5000) },
       );
+      if (tokenInfoResponse.ok) {
+        const tokenInfo = await tokenInfoResponse.json();
+        const acceptedAudiences = [
+          tokenInfo.aud,
+          tokenInfo.audience,
+          tokenInfo.issued_to,
+          tokenInfo.azp,
+        ].filter((value) => typeof value === "string" && value.length > 0);
+        if (acceptedAudiences.length && !acceptedAudiences.includes(clientId)) {
+          console.warn("[auth-google] token-info audience mismatch", {
+            stage,
+            audienceMatched: false,
+            hasAudience: Boolean(tokenInfo.aud || tokenInfo.audience || tokenInfo.issued_to || tokenInfo.azp),
+          });
+          return res.status(401).json({ message: "Google sign-in could not be verified for this application." });
+        }
+        if (tokenInfo.expires_in !== undefined && !(Number(tokenInfo.expires_in) > 0)) {
+          return res.status(401).json({ message: "Google sign-in token is expired. Please try again." });
+        }
+      } else if (tokenInfoResponse.status === 400 || tokenInfoResponse.status === 401) {
+        console.warn("[auth-google] token-info rejected access token", {
+          stage,
+          statusCode: tokenInfoResponse.status,
+        });
+        return res.status(401).json({ message: "Google sign-in token is invalid or expired. Please try again." });
+      } else {
+        console.warn("[auth-google] token-info diagnostic temporarily unavailable; continuing with userinfo", {
+          stage,
+          statusCode: tokenInfoResponse.status,
+        });
+      }
     } catch (error) {
-      console.warn("[auth-google] token-info request failed", {
+      // A transient tokeninfo timeout must not turn a valid Google login into
+      // a 503. The userinfo endpoint below independently validates the token.
+      console.warn("[auth-google] token-info diagnostic failed; continuing with userinfo", {
         stage,
         name: String(error?.name || "Error").slice(0, 80),
         code: String(error?.code || "").slice(0, 80),
       });
-      return res.status(503).json({ message: "Google sign-in verification is temporarily unavailable." });
-    }
-    if (!tokenInfoResponse.ok) {
-      console.warn("[auth-google] token-info rejected request", {
-        stage,
-        statusCode: tokenInfoResponse.status,
-      });
-      return res.status(tokenInfoResponse.status >= 500 ? 503 : 401).json({
-        message: tokenInfoResponse.status >= 500
-          ? "Google sign-in verification is temporarily unavailable."
-          : "Google sign-in token is invalid or expired. Please try again.",
-      });
-    }
-
-    let tokenInfo;
-    try {
-      tokenInfo = await tokenInfoResponse.json();
-    } catch (error) {
-      console.warn("[auth-google] token-info returned invalid JSON", {
-        stage,
-        name: String(error?.name || "Error").slice(0, 80),
-      });
-      return res.status(503).json({ message: "Google sign-in verification returned an invalid response. Please try again." });
-    }
-
-    const grantedScopes = typeof tokenInfo.scope === "string" ? tokenInfo.scope.split(" ") : [];
-    if (
-      tokenInfo.aud !== clientId ||
-      !(Number(tokenInfo.expires_in) > 0) ||
-      !grantedScopes.includes("openid") ||
-      !grantedScopes.includes("email") ||
-      !grantedScopes.includes("profile")
-    ) {
-      console.warn("[auth-google] token claims did not satisfy validation", {
-        stage,
-        audienceMatched: tokenInfo.aud === clientId,
-        tokenActive: Number(tokenInfo.expires_in) > 0,
-        hasOpenId: grantedScopes.includes("openid"),
-        hasEmail: grantedScopes.includes("email"),
-        hasProfile: grantedScopes.includes("profile"),
-      });
-      return res.status(401).json({ message: "Google sign-in could not be verified." });
     }
 
     stage = "Google user-info verification";
