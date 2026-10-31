@@ -27,12 +27,7 @@ import {
   sendPasswordChangedEmail,
   sendResetEmail,
 } from "../utils/email.js";
-import { sendSecurityNotifications } from "../utils/security-notifications.js";
 import { formatLocation, getRequestClientIp, resolveClientLocationAsync } from "../utils/geolocation.js";
-import NotificationPreference from "../models/NotificationPreference.js";
-import WebPushSubscription from "../models/WebPushSubscription.js";
-import SecurityNotification from "../models/SecurityNotification.js";
-import LoginEvent from "../models/LoginEvent.js";
 import { compareAdminPassword, validateAdminConfiguration } from "../services/admin-initialization.js";
 import {
   buildSessionResponse,
@@ -107,47 +102,9 @@ const startSession = async (req, res, user, authMethod = "password") => {
   const existingDevice = userAgent
     ? await Session.exists({ user: user._id, userAgent, createdAt: { $gte: new Date(Date.now() - 365 * 24 * 60 * 60 * 1000) } })
     : false;
-  const { sessionId, ip, geolocation, location, details } = await createSession(req, user._id, Boolean(existingDevice), authMethod);
+  const { sessionId } = await createSession(req, user._id, Boolean(existingDevice), authMethod);
   const token = jwt.sign({ id: user._id, sessionId }, process.env.JWT_SECRET, { expiresIn: "1d" });
-  try {
-    await LoginEvent.create({
-      user: user._id, sessionId, occurredAt: new Date(), ip: ip || undefined,
-      location, geolocation, locationMethod: geolocation.method,
-      userAgent: userAgent.slice(0, 500), browserVersion: details.browserVersion,
-      deviceType: details.deviceType,
-      locationCapturedAt: geolocation.capturedAt ? new Date(geolocation.capturedAt) : undefined,
-      locationAccuracyMeters: geolocation.accuracyMeters ?? undefined,
-      browser: details.browserName, platform: details.platform,
-      device: details.device, authMethod, isNewDevice: !existingDevice,
-    });
-  } catch (error) {
-    await Session.deleteOne({ user: user._id, sessionId }).catch(() => {});
-    throw error;
-  }
   res.cookie("token", token, authCookieOptions());
-  const sessionsUrl = (process.env.CLIENT_URL || process.env.APP_URL)
-    ? `${(process.env.CLIENT_URL || process.env.APP_URL).replace(/\/$/, "")}/dashboard/security`
-    : undefined;
-  // Login notifications are best-effort and never block a successful sign-in.
-  // Security notification persistence and delivery are best-effort; never
-  // hold up a valid login response if the notification system is unavailable.
-  void sendSecurityNotifications(user, {
-    time: new Date().toISOString(),
-    ip: ip || undefined,
-    userAgent: userAgent.slice(0, 500),
-    device: details.device,
-    deviceType: details.deviceType,
-    browser: details.browserName,
-    browserVersion: details.browserVersion,
-    platform: details.platform,
-    authMethod,
-    location,
-    geolocation,
-    locationMethod: geolocation.method,
-    locationCapturedAt: geolocation.capturedAt,
-    locationAccuracyMeters: geolocation.accuracyMeters,
-    sessionsUrl,
-  }, sessionId).catch(() => console.warn("Login security notification recording failed"));
   return sessionId;
 };
 
@@ -525,7 +482,6 @@ export const logout = async (req, res) => {
   try {
     const decoded = jwt.verify(req.cookies.token, process.env.JWT_SECRET);
     await Session.deleteOne({ sessionId: decoded.sessionId, user: decoded.id });
-    await LoginEvent.updateOne({ sessionId: decoded.sessionId, user: decoded.id, revokedAt: null }, { $set: { revokedAt: new Date() } });
 
     res.clearCookie("token", authCookieOptions()).json({ message: "Logged out" });
   } catch (err) {
@@ -637,7 +593,6 @@ export const logoutSession = async (req, res) => {
     if (!session) {
       return res.status(404).json({ message: "Session not found" });
     }
-    await LoginEvent.updateOne({ sessionId, user: req.user._id, revokedAt: null }, { $set: { revokedAt: new Date() } });
 
     // Emit socket event to that session (user’s device)
     if (global.io) {
@@ -683,7 +638,6 @@ export const logoutFromAllSessions = async (req, res) => {
       if (global.io) global.io.to(sessionId).emit("force-logout", { message: "This session has been revoked" });
     });
     await Session.deleteMany({ user: req.user._id });
-    await LoginEvent.updateMany({ user: req.user._id, revokedAt: null }, { $set: { revokedAt: new Date() } });
 
     // Clear the auth token cookie
     res.clearCookie("token", authCookieOptions());
@@ -698,7 +652,6 @@ export const logoutOtherSessions = async (req, res) => {
   try {
     const others = await Session.find({ user: req.user._id, sessionId: { $ne: req.sessionId } }).select("sessionId");
     const result = await revokeOtherSessions(Session, req.user._id, req.sessionId);
-    await LoginEvent.updateMany({ user: req.user._id, sessionId: { $in: others.map(({ sessionId }) => sessionId) }, revokedAt: null }, { $set: { revokedAt: new Date() } });
     others.forEach(({ sessionId }) => {
       if (global.io) global.io.to(sessionId).emit("force-logout", { message: "This session has been revoked" });
     });
@@ -721,10 +674,6 @@ export const deleteAccount = async (req, res) => {
     ]);
     await Promise.all([
       Session.deleteMany({ user: userId }),
-      WebPushSubscription.deleteMany({ user: userId }),
-      NotificationPreference.deleteOne({ user: userId }),
-      SecurityNotification.deleteMany({ user: userId }),
-      LoginEvent.deleteMany({ user: userId }),
       Activity.deleteMany({ user: userId }),
       Payment.deleteMany({ user: userId }),
       ServiceCollection.deleteMany({ user: userId }),
