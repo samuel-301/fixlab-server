@@ -109,19 +109,15 @@ const startSession = async (req, res, user, authMethod = "password") => {
   res.cookie("token", token, authCookieOptions());
 
   // Push delivery is deliberately detached from authentication success.
-  if (!existingDevice) {
-    void User.findById(user._id).select("pushEnabled").then((preferences) => {
-      if (preferences?.pushEnabled === true) {
-        return sendNewDevicePush({
-          userId: user._id,
-          sessionId,
-          device: details.device,
-          browser: details.browser,
-          location,
-          loginTime: new Date(),
-          excludeEndpoint: req.get("x-fixlab-push-endpoint"),
-        });
-      }
+  if (!existingDevice && user.pushEnabled === true) {
+    void sendNewDevicePush({
+      userId: user._id,
+      sessionId,
+      device: details.device,
+      browser: details.browser,
+      location,
+      loginTime: new Date(),
+      excludeEndpoint: req.get("x-fixlab-push-endpoint"),
     }).catch((error) => {
       console.error("[push] notification scheduling failed", {
         sessionId,
