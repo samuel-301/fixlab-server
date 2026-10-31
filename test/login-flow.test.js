@@ -1,7 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import bcrypt from "bcryptjs";
-import { OAuth2Client } from "google-auth-library";
 import User from "../models/User.js";
 import Session from "../models/Session.js";
 import { login, googleLogin } from "../controllers/auth.controller.js";
@@ -34,28 +33,39 @@ test("password login rejects invalid credentials without creating a session", as
   assert.equal(res.cookies.token, undefined);
 });
 
-test("Google login creates a session only after Google verifies the ID token", async (t) => {
+test("Google login creates a session only after Google validates the access token and profile", async (t) => {
   process.env.JWT_SECRET = "test-only-secret";
   process.env.GOOGLE_CLIENT_ID = "test-client-id";
+  process.env.CLIENT_ORIGINS = "https://fixlab.example";
   const user = { _id: "google-user", username: "person", email: "person@example.com", emailVerified: true };
-  t.mock.method(OAuth2Client.prototype, "verifyIdToken", async () => ({ getPayload: () => ({
-    iss: "https://accounts.google.com", aud: process.env.GOOGLE_CLIENT_ID, exp: Math.floor(Date.now() / 1000) + 60,
-    email_verified: true, sub: "google-sub", email: user.email,
-  }) }));
+  t.mock.method(global, "fetch", async (url) => {
+    if (String(url).includes("tokeninfo")) {
+      return { ok: true, json: async () => ({ aud: "test-client-id", expires_in: "3600", scope: "openid email profile" }) };
+    }
+    return { ok: true, json: async () => ({ sub: "google-sub", email: user.email, email_verified: true, name: "Person" }) };
+  });
   t.mock.method(User, "findOne", async () => user);
   prepareSessionMocks(t);
   const res = response();
-  await googleLogin({ body: { credential: "valid-google-id-token" }, ip: "127.0.0.1", get: () => "test-agent" }, res);
+  await googleLogin({
+    body: { accessToken: "valid-google-access-token" },
+    ip: "127.0.0.1",
+    get: (name) => name === "origin" ? "https://fixlab.example" : name === "x-requested-with" ? "XmlHttpRequest" : "test-agent",
+  }, res);
   assert.equal(res.statusCode, 200);
   assert.ok(res.cookies.token);
 });
-
-test("Google login does not create a session for a rejected ID token", async (t) => {
+test("Google login does not create a session for an invalid access token", async (t) => {
   process.env.GOOGLE_CLIENT_ID = "test-client-id";
-  t.mock.method(OAuth2Client.prototype, "verifyIdToken", async () => { throw new Error("invalid token"); });
+  process.env.CLIENT_ORIGINS = "https://fixlab.example";
+  t.mock.method(global, "fetch", async () => ({ ok: false, json: async () => ({}) }));
   const save = t.mock.method(Session.prototype, "save", async function save() { return this; });
   const res = response();
-  await googleLogin({ body: { credential: "invalid-google-id-token" }, ip: "127.0.0.1", get: () => "test-agent" }, res);
+  await googleLogin({
+    body: { accessToken: "invalid-google-access-token" },
+    ip: "127.0.0.1",
+    get: (name) => name === "origin" ? "https://fixlab.example" : name === "x-requested-with" ? "XmlHttpRequest" : "test-agent",
+  }, res);
   assert.equal(res.statusCode, 401);
   assert.equal(save.mock.callCount(), 0);
   assert.equal(res.cookies.token, undefined);
