@@ -24,8 +24,6 @@ const [
   { default: activityRoutes },
   { closeRedis, getRedisStatus },
   { getOperationalMetrics, requestMetricsMiddleware },
-  { default: notificationRoutes },
-  { default: securityRoutes },
 ] = await Promise.all([
   import('./config/db.js'),
   import('./routes/device.routes.js'),
@@ -36,8 +34,6 @@ const [
   import('./routes/activity.routes.js'),
   import('./config/redis.js'),
   import('./utils/operationalMetrics.js'),
-  import('./routes/notifications.routes.js'),
-  import('./routes/security.routes.js'),
 ]);
 
 const { initializeAdmin } = await import('./services/admin-initialization.js');
@@ -121,8 +117,6 @@ app.use((req, res, next) => {
 app.use('/api/device', deviceRoutes);
 app.use('/api/collection', collectionRoutes);
 app.use('/api/auth', authRoutes);
-app.use('/api/notifications', notificationRoutes);
-app.use('/api/security', securityRoutes);
 app.use('/api/service-collection', serviceCollectionRoutes);
 app.use('/api/payment', paymentRoutes);
 app.use("/api/activities", activityRoutes);
