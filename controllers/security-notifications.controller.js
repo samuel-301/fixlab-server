@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { isIP } from "node:net";
 import User from "../models/User.js";
 import PushSubscription from "../models/PushSubscription.js";
 import { getVapidPublicKey, isPushConfigured } from "../utils/push-notifications.js";
@@ -8,10 +9,18 @@ const validSubscription = (value) => {
   if (!value || typeof value !== "object" || typeof value.endpoint !== "string" ||
       value.endpoint.length > 2048 || !value.endpoint.startsWith("https://") ||
       !value.keys || typeof value.keys.p256dh !== "string" || typeof value.keys.auth !== "string" ||
-      value.keys.p256dh.length > 256 || value.keys.auth.length > 256) return false;
+      !/^[A-Za-z0-9_-]{80,100}$/.test(value.keys.p256dh) ||
+      !/^[A-Za-z0-9_-]{16,64}$/.test(value.keys.auth)) return false;
   try {
     const endpoint = new URL(value.endpoint);
-    return endpoint.protocol === "https:" && Boolean(endpoint.hostname);
+    const hostname = endpoint.hostname.toLowerCase().replace(/\\.$/, "");
+    return endpoint.protocol === "https:" &&
+      Boolean(hostname) &&
+      !isIP(hostname.replace(/^\\[|\\]$/g, "")) &&
+      hostname !== "localhost" &&
+      !hostname.endsWith(".localhost") &&
+      !hostname.endsWith(".local") &&
+      !hostname.endsWith(".internal");
   } catch {
     return false;
   }
