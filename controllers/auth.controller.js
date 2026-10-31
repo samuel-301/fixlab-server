@@ -11,6 +11,7 @@ import Device from "../models/Device.js";
 import Payment from "../models/Payment.js";
 import ServiceCollection from "../models/ServiceCollection.js";
 import AuthChallenge from "../models/AuthChallenge.js";
+import PushSubscription from "../models/PushSubscription.js";
 import { sendNewDevicePush } from "../utils/push-notifications.js";
 import {
   generateOpaqueToken,
@@ -697,6 +698,7 @@ export const deleteAccount = async (req, res) => {
     ]);
     await Promise.all([
       Session.deleteMany({ user: userId }),
+      PushSubscription.deleteMany({ user: userId }),
       Activity.deleteMany({ user: userId }),
       Payment.deleteMany({ user: userId }),
       ServiceCollection.deleteMany({ user: userId }),
