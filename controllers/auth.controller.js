@@ -104,7 +104,7 @@ const startSession = async (req, res, user, authMethod = "password") => {
   const existingDevice = userAgent
     ? await Session.exists({ user: user._id, userAgent, createdAt: { $gte: new Date(Date.now() - 365 * 24 * 60 * 60 * 1000) } })
     : false;
-  const { sessionId, geolocation, location, details } = await createSession(req, user._id, Boolean(existingDevice), authMethod);
+  const { sessionId, location, details } = await createSession(req, user._id, Boolean(existingDevice), authMethod);
   const token = jwt.sign({ id: user._id, sessionId }, process.env.JWT_SECRET, { expiresIn: "1d" });
   res.cookie("token", token, authCookieOptions());
 
