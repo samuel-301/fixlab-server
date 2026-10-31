@@ -33,7 +33,6 @@
     "socket.io": "^4.8.1",
     "useragent": "^2.3.0",
     "uuid": "^11.1.0",
-    "web-push": "^3.6.7"
   },
   "devDependencies": {
     "nodemon": "^3.1.10"
