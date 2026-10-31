@@ -311,7 +311,6 @@ export const completePasswordReset = async (req, res) => {
     const user = await User.findOneAndUpdate(emailLookup(challenge.email), { $set: { password: await bcrypt.hash(password, 12) } }, { new: true });
     if (!user) return res.status(400).json({ message: "The reset link is invalid or expired." });
     await Session.deleteMany({ user: user._id });
-    await LoginEvent.updateMany({ user: user._id, revokedAt: null }, { $set: { revokedAt: new Date() } });
     await AuthChallenge.deleteMany({ email: challenge.email, purpose: "password-reset", _id: { $ne: challenge._id } });
     void sendPasswordChangedEmail(user.email).catch(() => {});
     return res.json({ message: "Password changed. Sign in with your new password." });
