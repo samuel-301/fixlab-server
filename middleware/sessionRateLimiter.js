@@ -28,11 +28,3 @@ export const emailChallengeLimiter = rateLimit({
   message: { message: "Too many email requests. Try again later." },
 });
 
-export const notificationSettingsLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  limit: 20,
-  standardHeaders: "draft-8",
-  legacyHeaders: false,
-  store: new RedisRateLimitStore({ prefix: "notification-settings" }),
-  message: { message: "Too many notification settings changes. Try again later." },
-});
