@@ -7,7 +7,8 @@
     "dev": "nodemon server.js",
     "start": "node server.js",
     "migrate:devices": "node scripts/migrate-legacy-records.js",
-    "test": "node --test"
+    "test": "node --test",
+    "migrate:remove-login-notifications": "node scripts/remove-login-notification-data.js"
   },
   "keywords": [],
   "author": "",
@@ -32,7 +33,7 @@
     "redis": "^5.12.1",
     "socket.io": "^4.8.1",
     "useragent": "^2.3.0",
-    "uuid": "^11.1.0",
+    "uuid": "^11.1.0"
   },
   "devDependencies": {
     "nodemon": "^3.1.10"
