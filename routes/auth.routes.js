@@ -26,21 +26,8 @@ import {
 import { isAdmin, requireAuth } from "../middleware/authMiddleware.js";
 import uploadP from "../middleware/profileUpload.js";
 import { requireSameOrigin } from "../middleware/requireSameOrigin.js";
-import { authenticationLimiter, emailChallengeLimiter, notificationSettingsLimiter, sessionMutationLimiter } from "../middleware/sessionRateLimiter.js";
+import { authenticationLimiter, emailChallengeLimiter, sessionMutationLimiter } from "../middleware/sessionRateLimiter.js";
 import { invalidateUserCache } from "../middleware/responseCache.js";
-import {
-  getSecurityNotificationSettings,
-  updateSecurityNotificationSettings,
-  registerWebPushSubscription,
-  removeWebPushSubscription,
-  getSecurityNotifications,
-  getCurrentLoginNotification,
-  getUnreadSecurityNotificationCount,
-  markSecurityNotificationRead,
-  getLoginEvents,
-  getCurrentWebPushSubscription,
-} from "../controllers/security-notifications.controller.js";
-
 const router = express.Router();
 
 router.post("/register", requireSameOrigin, authenticationLimiter, register);
@@ -60,16 +47,6 @@ router.get("/profile", requireAuth, getProfile);
 router.put("/edit-profile", requireSameOrigin, requireAuth, invalidateUserCache, uploadP.single('profile'), updateProfile);
 router.delete("/account", requireSameOrigin, requireAuth, invalidateUserCache, deleteAccount);
 router.get("/sessions", requireAuth, getMySessions);
-router.get("/security-notifications", requireAuth, getSecurityNotificationSettings);
-router.get("/security-notifications/subscriptions/current", requireAuth, getCurrentWebPushSubscription);
-router.get("/notifications", requireAuth, getSecurityNotifications);
-router.get("/notifications/current-login", requireAuth, getCurrentLoginNotification);
-router.get("/notifications/unread-count", requireAuth, getUnreadSecurityNotificationCount);
-router.patch("/notifications/:id/read", requireSameOrigin, requireAuth, markSecurityNotificationRead);
-router.get("/security/login-events", requireAuth, getLoginEvents);
-router.patch("/security-notifications", requireSameOrigin, requireAuth, notificationSettingsLimiter, updateSecurityNotificationSettings);
-router.post("/security-notifications/subscriptions", requireSameOrigin, requireAuth, notificationSettingsLimiter, registerWebPushSubscription);
-router.delete("/security-notifications/subscriptions/:subscriptionId", requireSameOrigin, requireAuth, notificationSettingsLimiter, removeWebPushSubscription);
 router.get("/sessions/:sessionId", requireAuth, getSessionDetails);
 router.delete("/sessions/:sessionId", requireSameOrigin, requireAuth, sessionMutationLimiter, logoutSession);
 router.delete("/sessions-others", requireSameOrigin, requireAuth, sessionMutationLimiter, logoutOtherSessions);
